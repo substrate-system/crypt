@@ -6,8 +6,7 @@ import { webcrypto } from '@substrate-system/one-webcrypto'
 import * as u from 'uint8arrays'
 import chalk from 'chalk'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-expressions, @typescript-eslint/no-floating-promises
-yargs(hideBin(process.argv))
+await yargs(hideBin(process.argv))
     .command(
         'keys [algorithm]',
         'Create a new keypair',
@@ -70,7 +69,7 @@ yargs(hideBin(process.argv))
     .demandCommand(1, 'You must provide a command')
     .help()
     .alias('help', 'h')
-    .argv
+    .parse()
 
 /**
  * Generate a new keypair.
@@ -95,12 +94,10 @@ async function keysCommand (args:{
             const publicKey = await webcrypto.subtle.exportKey('raw', keypair.publicKey)
             const privateKey = await webcrypto.subtle.exportKey('pkcs8', keypair.privateKey)
 
-            console.log(chalk.bold.green('✓ Ed25519 keypair generated:\n'))
-            console.log(chalk.bold('Public Key:'))
-            console.log(formatOutput(new Uint8Array(publicKey), format))
-            console.log()
-            console.log(chalk.bold('Private Key (PKCS#8):'))
-            console.log(formatOutput(new Uint8Array(privateKey), format))
+            console.log(JSON.stringify({
+                publicKey: formatOutput(new Uint8Array(publicKey), format),
+                privateKey: formatOutput(new Uint8Array(privateKey), format)
+            }))
         } else if (args.algorithm === 'rsa') {
             const keypair = await webcrypto.subtle.generateKey(
                 {
@@ -116,12 +113,10 @@ async function keysCommand (args:{
             const publicKey = await webcrypto.subtle.exportKey('spki', keypair.publicKey)
             const privateKey = await webcrypto.subtle.exportKey('pkcs8', keypair.privateKey)
 
-            console.log(chalk.bold.green('✓ RSA keypair generated:\n'))
-            console.log(chalk.bold('Public Key (SPKI):'))
-            console.log(formatOutput(new Uint8Array(publicKey), format))
-            console.log()
-            console.log(chalk.bold('Private Key (PKCS#8):'))
-            console.log(formatOutput(new Uint8Array(privateKey), format))
+            console.log(JSON.stringify({
+                publicKey: formatOutput(new Uint8Array(publicKey), format),
+                privateKey: formatOutput(new Uint8Array(privateKey), format)
+            }))
         }
     } catch (err) {
         console.error(chalk.red('Error generating keypair:'), err)

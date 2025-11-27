@@ -1,11 +1,16 @@
 {
-  "type": "module",
-  "private": true,
+  "name": "@substrate-system/crypt",
   "version": "0.0.0",
+  "description": "CLI tool for creating and ecoding keys",
+  "type": "module",
   "main": "dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "./dist/*"
   ],
+  "bin": {
+    "crypt": "dist/cli.js"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./*": [
@@ -45,6 +50,21 @@
     "markdown-toc": "^1.2.0",
     "tap-spec": "^5.0.0",
     "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "cryptography",
+    "crypto",
+    "key",
+    "string",
+    "encode"
+  ],
+  "homepage": "https://github.com/substrate-system/crypt",
+  "bugs": {
+    "url": "https://github.com/substrate-system/crypt/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/substrate-system/crypt.git"
   },
   "license": "SEE LICENSE IN LICENSE",
   "author": "nichoth <nichoth@gmail.com> (https://nichoth.com)"
