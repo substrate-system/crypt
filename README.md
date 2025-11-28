@@ -110,6 +110,11 @@ is encoded as `base58btc` by default.
   - `base64url` - URL-safe base64 encoding
   - `did` - Decentralized identifier format (`did:key:z...`)
 
+* `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
+  - When enabled, adds the appropriate [multibase](https://github.com/multiformats/multibase) prefix for the encoding format
+  - Prefixes: `m` (base64), `M` (base64pad), `u` (base64url), `U` (base64urlpad), `z` (base58btc), `f` (hex)
+  - Note: `base58btc` always includes the `z` prefix for backward compatibility
+
 * `--public` - Output format for the public key only
   - Accepts same values as `--format`
   - Overrides `--format` for public key
@@ -136,6 +141,13 @@ npx crypt keys --public did --private base64url
 
 # Generate keypair with public key as DID, private key uses default format
 npx crypt keys --public did
+
+# Generate keypair with multibase encoding (adds prefixes)
+npx crypt keys --format hex --multi
+# => {"publicKey":"ff8291f2...", "privateKey":"f302e020..."}
+
+npx crypt keys --format base64 -m
+# => {"publicKey":"mCKHyYn...", "privateKey":"mMC4AIA..."}
 ```
 
 ---
@@ -154,6 +166,11 @@ Convert a string from one encoding format to another. Reads input from stdin.
 * `-i, --input-format` - The format of the input string (default: `utf8`)
   - `base64`, `hex`, `base64url`, `base58btc`, `utf8`, `ascii`
 
+* `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
+  - Add the appropriate [multibase](https://github.com/multiformats/multibase)
+    prefix to the output.
+  - Prefixes: `m` (base64), `u` (base64url), `z` (base58btc), `f` (hex)
+
 #### `encode` Example
 
 ```sh
@@ -171,6 +188,16 @@ echo "48656c6c6f" | npx crypt encode base58btc -i hex
 
 # Pipe between commands
 npx crypt keys | jq -r .publicKey | npx crypt encode hex -i base58btc
+
+# Encode with multibase prefixes
+echo "Hello World" | npx crypt encode base64 --multi
+# => mSGVsbG8gV29ybGQ
+
+echo "Hello World" | npx crypt encode hex -m
+# => f48656c6c6f20576f726c64
+
+echo "Hello World" | npx crypt encode base64url --multi
+# => uSGVsbG8gV29ybGQ
 ```
 
 ---
