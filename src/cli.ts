@@ -40,14 +40,14 @@ await yargs(hideBin(process.argv))
                     describe: 'Output format for both keys',
                     type: 'string',
                     choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did'],
+                        'base58btc', 'did', 'multikey'],
                     default: 'base58btc'
                 })
                 .option('public', {
                     describe: 'Output format for the public key',
                     type: 'string',
                     choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did']
+                        'base58btc', 'did', 'multikey']
                 })
                 .option('private', {
                     describe: 'Output format for the private key',
@@ -65,8 +65,8 @@ await yargs(hideBin(process.argv))
         async (argv) => {
             await keysCommand({
                 algorithm: argv.algorithm as 'ed25519'|'rsa',
-                format: argv.format as u.SupportedEncodings|'did',
-                publicFormat: argv.public as u.SupportedEncodings|'did'|undefined,
+                format: argv.format as u.SupportedEncodings|'did'|'multikey',
+                publicFormat: argv.public as u.SupportedEncodings|'did'|'multikey'|undefined,
                 privateFormat: argv.private as u.SupportedEncodings|undefined,
                 useMultibase: argv.multi as boolean
             })
@@ -146,8 +146,8 @@ await yargs(hideBin(process.argv))
  */
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
-    format?:u.SupportedEncodings|'did',
-    publicFormat?:u.SupportedEncodings|'did',
+    format?:u.SupportedEncodings|'did'|'multikey',
+    publicFormat?:u.SupportedEncodings|'did'|'multikey',
     privateFormat?:u.SupportedEncodings,
     useMultibase?:boolean
 } = { algorithm: 'ed25519', format: 'base58btc' }) {
@@ -185,7 +185,7 @@ async function keysCommand (args:{
                 ),
                 privateKey: await formatOutput(
                     new Uint8Array(privateKey),
-                    privateFormat as u.SupportedEncodings|'did',
+                    privateFormat as u.SupportedEncodings|'did'|'multikey',
                     useMultibase,
                     'ed25519'
                 )
@@ -220,7 +220,7 @@ async function keysCommand (args:{
                 ),
                 privateKey: await formatOutput(
                     new Uint8Array(privateKey),
-                    privateFormat as u.SupportedEncodings|'did',
+                    privateFormat as u.SupportedEncodings|'did'|'multikey',
                     useMultibase,
                     'rsa'
                 )
@@ -251,16 +251,24 @@ function getMultibasePrefix (format:u.SupportedEncodings):string {
 }
 
 /**
- * Format output with multibase prefix for base58btc or DID format.
+ * Format output with multibase prefix for base58btc, DID, or multikey format.
  */
 async function formatOutput (
     bytes:Uint8Array,
-    format:u.SupportedEncodings|'did',
+    format:u.SupportedEncodings|'did'|'multikey',
     useMultibase = false,
     keyType?:'ed25519'|'rsa'
 ):Promise<string> {
     if (format === 'did') {
         return await publicKeyToDid(bytes, keyType)
+    }
+
+    if (format === 'multikey') {
+        // Multikey format: multicodec prefix + base58btc encoded
+        // For Ed25519: 0xed01, For RSA: 0x1205
+        const did = await publicKeyToDid(bytes, keyType)
+        // Extract the multikey part (everything after "did:key:")
+        return did.replace('did:key:', '')
     }
 
     const encoded = u.toString(bytes, format as u.SupportedEncodings)

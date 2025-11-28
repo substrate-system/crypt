@@ -364,6 +364,74 @@ test('DID decoded public key can be re-encoded to same DID', async t => {
         'Re-encoding decoded public key should produce identical DID')
 })
 
+// Test multikey format
+test('keys command outputs multikey format with --public multikey', async t => {
+    const result = await runCLI(['keys', 'ed25519', '--public', 'multikey'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+    const multikey = output.publicKey
+
+    t.ok(multikey.startsWith('z6Mk'),
+        'Ed25519 multikey should start with z6Mk (multicodec 0xed01 + base58btc)')
+})
+
+test('multikey format is DID without the did:key: prefix', async t => {
+    // Generate both DID and multikey formats
+    const resultDid = await runCLI(['keys', 'ed25519', '--public', 'did'])
+    const resultMultikey = await runCLI(['keys', 'ed25519', '--public', 'multikey'])
+
+    t.equal(resultDid.code, 0, 'DID command should exit with code 0')
+    t.equal(resultMultikey.code, 0, 'multikey command should exit with code 0')
+
+    // Parse outputs - note: these are different keys since we generated twice
+    // But we can verify the structure
+    const outputDid = JSON.parse(resultDid.stdout.trim())
+    const outputMultikey = JSON.parse(resultMultikey.stdout.trim())
+
+    const did = outputDid.publicKey
+    const multikey = outputMultikey.publicKey
+
+    // DID should have the prefix
+    t.ok(did.startsWith('did:key:'),
+        'DID should start with did:key:')
+
+    // Multikey should not have the prefix
+    t.ok(!multikey.startsWith('did:key:'),
+        'Multikey should not have did:key: prefix')
+    t.ok(multikey.startsWith('z6Mk'),
+        'Multikey should start with z6Mk')
+})
+
+test('multikey format works with --format multikey', async t => {
+    const result = await runCLI(['keys', 'ed25519', '--format', 'multikey'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+
+    t.ok(output.publicKey.startsWith('z6Mk'),
+        'public key should be in multikey format')
+    t.ok(output.privateKey.startsWith('z'),
+        'private key should be in multikey format (though it uses different multicodec)')
+})
+
+test('RSA multikey has different prefix than Ed25519', async t => {
+    const result = await runCLI(['keys', 'rsa', '--public', 'multikey'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+    const multikey = output.publicKey
+
+    // RSA uses multicodec 0x1205, which encodes differently
+    t.ok(!multikey.startsWith('z6Mk'),
+        'RSA multikey should not start with z6Mk')
+    t.ok(multikey.startsWith('z'),
+        'RSA multikey should still use base58btc (z prefix)')
+})
+
 /**
  * Helper function to run the CLI command and capture output
  */
