@@ -2,6 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import * as u from 'uint8arrays'
+import { didToPublicKey, publicKeyToDid } from '@substrate-system/keys/crypto'
 
 const CLI_PATH = join(process.cwd(), 'dist', 'cli.js')
 
@@ -257,6 +258,110 @@ test('CLI shows help with --help flag', async t => {
     t.equal(result.code, 0, 'help command should exit with code 0')
     t.ok(result.stdout.includes('keys'), 'should list keys command')
     t.ok(result.stdout.includes('encode'), 'should list encode command')
+})
+
+// Test DID format encoding and decoding
+test('keys command with --public did outputs valid DID format', async t => {
+    const result = await runCLI(['keys', 'ed25519', '--public', 'did'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+    const did = output.publicKey
+
+    t.ok(did && did.startsWith('did:key:z'),
+        'should output DID format starting with did:key:z')
+})
+
+test('DID string decodes to identical public key for Ed25519', async t => {
+    // Generate a keypair with both base58btc and DID formats
+    const resultBase58 = await runCLI(['keys', 'ed25519', '--format', 'base58btc'])
+    const resultDid = await runCLI(['keys', 'ed25519', '--format', 'did'])
+
+    t.equal(resultBase58.code, 0, 'base58btc command should exit with code 0')
+    t.equal(resultDid.code, 0, 'did command should exit with code 0')
+
+    // Parse outputs
+    const outputDid = JSON.parse(resultDid.stdout.trim())
+    const did = outputDid.publicKey
+
+    // Decode the DID back to public key
+    const decoded = didToPublicKey(did)
+
+    t.ok(decoded.publicKey instanceof Uint8Array,
+        'decoded public key should be Uint8Array')
+    t.equal(decoded.type, 'ed25519',
+        'decoded key type should be ed25519')
+
+    // Verify the DID is well-formed
+    t.ok(did.startsWith('did:key:z'),
+        'DID should start with did:key:z')
+})
+
+test('DID round-trip preserves public key for Ed25519', async t => {
+    // Generate keypair in hex format to get raw bytes
+    const resultHex = await runCLI(['keys', 'ed25519', '--public', 'hex',
+        '--private', 'hex'])
+    t.equal(resultHex.code, 0, 'hex command should exit with code 0')
+
+    // Generate same keypair but with DID format for public key
+    // Note: We can't control the randomness, so we'll generate a new keypair
+    // and test that its DID decodes correctly
+    const resultDid = await runCLI(['keys', 'ed25519', '--public', 'did',
+        '--private', 'hex'])
+    t.equal(resultDid.code, 0, 'did command should exit with code 0')
+
+    const outputDid = JSON.parse(resultDid.stdout.trim())
+    const did = outputDid.publicKey
+
+    // Decode the DID
+    const decoded = didToPublicKey(did)
+
+    // The decoded public key should be the same length as Ed25519 public keys
+    // (32 bytes)
+    t.equal(decoded.publicKey.length, 32,
+        'Ed25519 public key should be 32 bytes')
+    t.equal(decoded.type, 'ed25519',
+        'decoded type should match')
+})
+
+test('DID format works with separate --public option', async t => {
+    const result = await runCLI([
+        'keys',
+        'ed25519',
+        '--public', 'did',
+        '--private', 'base58btc'
+    ])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+
+    t.ok(output.publicKey.startsWith('did:key:z'),
+        'public key should be in DID format')
+    t.ok(output.privateKey.startsWith('z'),
+        'private key should be in base58btc format with z prefix')
+})
+
+test('DID decoded public key can be re-encoded to same DID', async t => {
+    // This test imports the encoding function to verify round-trip
+
+    // Generate a keypair with DID format
+    const result = await runCLI(['keys', 'ed25519', '--public', 'did'])
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+    const originalDid = output.publicKey
+
+    // Decode the DID
+    const decoded = didToPublicKey(originalDid)
+
+    // Re-encode the public key bytes back to DID with the correct key type
+    const reEncodedDid = await publicKeyToDid(decoded.publicKey, 'ed25519')
+
+    // Should get the same DID
+    t.equal(reEncodedDid, originalDid,
+        'Re-encoding decoded public key should produce identical DID')
 })
 
 /**

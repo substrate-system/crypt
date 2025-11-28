@@ -9,6 +9,7 @@
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
 A CLI tool for creating keys and encoding strings.
+This exposes a command `crypt`.
 
 
 <details><summary><h2>Contents</h2></summary>
@@ -48,6 +49,14 @@ This will print a JSON string with `{ publickKey, privateKey }` to `stdout`.
 The default string encoding is `base58btc`. You can pass in a different encoding
 to use for the output with the `-f` or `--format` option, or use separate
 `--public` and `--private` options to encode each key differently.
+
+Create a keypair with `base64` encoded private key, and DID format public key:
+
+```sh
+npx crypt keys -f base64 --public did
+```
+
+---
 
 ```sh
 # Generate Ed25519 keypair
@@ -111,9 +120,10 @@ is encoded as `base58btc` by default.
   - `did` - Decentralized identifier format (`did:key:z...`)
 
 * `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
-  - When enabled, adds the appropriate [multibase](https://github.com/multiformats/multibase) prefix for the encoding format
-  - Prefixes: `m` (base64), `M` (base64pad), `u` (base64url), `U` (base64urlpad), `z` (base58btc), `f` (hex)
-  - Note: `base58btc` always includes the `z` prefix for backward compatibility
+  - When enabled, adds the appropriate [multibase](https://github.com/multiformats/multibase)
+    prefix for the encoding format
+  - Prefixes: `m` (base64), `M` (base64pad), `u` (base64url),
+    `U` (base64urlpad), `z` (base58btc), `f` (hex)
 
 * `--public` - Output format for the public key only
   - Accepts same values as `--format`
@@ -134,7 +144,7 @@ npx crypt keys
 npx crypt keys rsa --format hex
 
 # Generate Ed25519 keypair in base64pad
-npx crypt keys ed25519 -f base64pad
+npx crypt keys -f base64pad
 
 # Generate keypair with public key as DID and private key as base64url
 npx crypt keys --public did --private base64url

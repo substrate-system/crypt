@@ -4,6 +4,7 @@ import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import { webcrypto } from '@substrate-system/one-webcrypto'
 import * as u from 'uint8arrays'
+import { publicKeyToDid } from '@substrate-system/keys/crypto'
 import chalk from 'chalk'
 
 /**
@@ -38,18 +39,21 @@ await yargs(hideBin(process.argv))
                     alias: 'f',
                     describe: 'Output format for both keys',
                     type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc', 'did'],
+                    choices: ['base64', 'base64pad', 'hex', 'base64url',
+                        'base58btc', 'did'],
                     default: 'base58btc'
                 })
                 .option('public', {
                     describe: 'Output format for the public key',
                     type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc', 'did']
+                    choices: ['base64', 'base64pad', 'hex', 'base64url',
+                        'base58btc', 'did']
                 })
                 .option('private', {
                     describe: 'Output format for the private key',
                     type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc']
+                    choices: ['base64', 'base64pad', 'hex', 'base64url',
+                        'base58btc']
                 })
                 .option('multi', {
                     alias: 'm',
@@ -60,10 +64,10 @@ await yargs(hideBin(process.argv))
         },
         async (argv) => {
             await keysCommand({
-                algorithm: argv.algorithm as 'ed25519' | 'rsa',
-                format: argv.format as u.SupportedEncodings | 'did',
-                publicFormat: argv.public as u.SupportedEncodings | 'did' | undefined,
-                privateFormat: argv.private as u.SupportedEncodings | undefined,
+                algorithm: argv.algorithm as 'ed25519'|'rsa',
+                format: argv.format as u.SupportedEncodings|'did',
+                publicFormat: argv.public as u.SupportedEncodings|'did'|undefined,
+                privateFormat: argv.private as u.SupportedEncodings|undefined,
                 useMultibase: argv.multi as boolean
             })
         }
@@ -142,8 +146,8 @@ await yargs(hideBin(process.argv))
  */
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
-    format?:u.SupportedEncodings | 'did',
-    publicFormat?:u.SupportedEncodings | 'did',
+    format?:u.SupportedEncodings|'did',
+    publicFormat?:u.SupportedEncodings|'did',
     privateFormat?:u.SupportedEncodings,
     useMultibase?:boolean
 } = { algorithm: 'ed25519', format: 'base58btc' }) {
@@ -173,8 +177,18 @@ async function keysCommand (args:{
             )
 
             console.log(JSON.stringify({
-                publicKey: formatOutput(new Uint8Array(publicKey), publicFormat, useMultibase),
-                privateKey: formatOutput(new Uint8Array(privateKey), privateFormat as u.SupportedEncodings | 'did', useMultibase)
+                publicKey: await formatOutput(
+                    new Uint8Array(publicKey),
+                    publicFormat,
+                    useMultibase,
+                    'ed25519'
+                ),
+                privateKey: await formatOutput(
+                    new Uint8Array(privateKey),
+                    privateFormat as u.SupportedEncodings|'did',
+                    useMultibase,
+                    'ed25519'
+                )
             }))
         } else if (args.algorithm === 'rsa') {
             const keypair = await webcrypto.subtle.generateKey(
@@ -198,8 +212,18 @@ async function keysCommand (args:{
             )
 
             console.log(JSON.stringify({
-                publicKey: formatOutput(new Uint8Array(publicKey), publicFormat, useMultibase),
-                privateKey: formatOutput(new Uint8Array(privateKey), privateFormat as u.SupportedEncodings | 'did', useMultibase)
+                publicKey: await formatOutput(
+                    new Uint8Array(publicKey),
+                    publicFormat,
+                    useMultibase,
+                    'rsa'
+                ),
+                privateKey: await formatOutput(
+                    new Uint8Array(privateKey),
+                    privateFormat as u.SupportedEncodings|'did',
+                    useMultibase,
+                    'rsa'
+                )
             }))
         }
     } catch (err) {
@@ -229,14 +253,14 @@ function getMultibasePrefix (format:u.SupportedEncodings):string {
 /**
  * Format output with multibase prefix for base58btc or DID format.
  */
-function formatOutput (
+async function formatOutput (
     bytes:Uint8Array,
-    format:u.SupportedEncodings | 'did',
-    useMultibase = false
-):string {
+    format:u.SupportedEncodings|'did',
+    useMultibase = false,
+    keyType?:'ed25519'|'rsa'
+):Promise<string> {
     if (format === 'did') {
-        // DID format: did:key:z<base58btc-encoded-key>
-        return 'did:key:z' + u.toString(bytes, 'base58btc')
+        return await publicKeyToDid(bytes, keyType)
     }
 
     const encoded = u.toString(bytes, format as u.SupportedEncodings)
@@ -246,7 +270,8 @@ function formatOutput (
         return prefix + encoded
     }
 
-    // Legacy behavior: always add 'z' prefix for base58btc when not using multibase flag
+    // Legacy behavior: always add 'z' prefix for base58btc when not
+    // using multibase flag
     if (format === 'base58btc') {
         return 'z' + encoded
     }
