@@ -6,6 +6,22 @@ import { webcrypto } from '@substrate-system/one-webcrypto'
 import * as u from 'uint8arrays'
 import chalk from 'chalk'
 
+/**
+ * Read all data from stdin.
+ */
+async function readStdin ():Promise<string> {
+    return new Promise((resolve, reject) => {
+        const chunks:Buffer[] = []
+        process.stdin.on('data', (chunk) => {
+            chunks.push(chunk)
+        })
+        process.stdin.on('end', () => {
+            resolve(Buffer.concat(chunks).toString())
+        })
+        process.stdin.on('error', reject)
+    })
+}
+
 await yargs(hideBin(process.argv))
     .command(
         'keys [algorithm]',
@@ -22,8 +38,8 @@ await yargs(hideBin(process.argv))
                     alias: 'f',
                     describe: 'Output format for the keys',
                     type: 'string',
-                    choices: ['base64', 'hex', 'base64url', 'base58btc'],
-                    default: 'base64'
+                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc'],
+                    default: 'base58btc'
                 })
         },
         async (argv) => {
@@ -34,34 +50,58 @@ await yargs(hideBin(process.argv))
         }
     )
     .command(
-        'encode <input> <output-format>',
+        'encode [output-format]',
         'Encode a string from one format to another',
         (yargs) => {
             return yargs
-                .positional('input', {
-                    describe: 'The input string to encode',
-                    type: 'string',
-                    demandOption: true
-                })
                 .positional('output-format', {
                     describe: 'The desired output format',
                     type: 'string',
-                    choices: ['base64', 'hex', 'base64url', 'base58btc', 'utf8', 'ascii'],
-                    demandOption: true
+                    choices: ['base64', 'hex', 'base64url', 'base58btc',
+                        'utf8', 'ascii'],
+                    default: 'base58btc'
                 })
                 .option('input-format', {
                     alias: 'i',
                     describe: 'The format of the input string',
                     type: 'string',
-                    choices: ['base64', 'hex', 'base64url', 'base58btc', 'utf8', 'ascii'],
+                    choices: ['base64', 'hex', 'base64url', 'base58btc',
+                        'utf8', 'ascii'],
                     default: 'utf8'
                 })
         },
         async (argv) => {
+            // Read from stdin
+            const input = (await readStdin()).trim()
+
             const result = await encodeCommand(
-                argv.input,
+                input,
                 argv['input-format'] as u.SupportedEncodings,
                 argv['output-format'] as u.SupportedEncodings
+            )
+            console.log(result)
+        }
+    )
+    .command(
+        'decode [input-format]',
+        'Decode a string to UTF-8',
+        (yargs) => {
+            return yargs
+                .positional('input-format', {
+                    describe: 'The format of the input string',
+                    type: 'string',
+                    choices: ['base64', 'base64pad', 'hex', 'base64url',
+                        'base58btc', 'ascii'],
+                    default: 'base64'
+                })
+        },
+        async (argv) => {
+            // Read from stdin
+            const input = (await readStdin()).trim()
+
+            const result = await decodeCommand(
+                input,
+                argv['input-format'] as u.SupportedEncodings
             )
             console.log(result)
         }
@@ -77,8 +117,8 @@ await yargs(hideBin(process.argv))
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
     format?:u.SupportedEncodings
-} = { algorithm: 'ed25519', format: 'base64' }) {
-    const format = args.format || 'base64'
+} = { algorithm: 'ed25519', format: 'base58btc' }) {
+    const format = args.format || 'base58btc'
 
     try {
         if (args.algorithm === 'ed25519') {
@@ -91,8 +131,14 @@ async function keysCommand (args:{
                 ['sign', 'verify']
             )
 
-            const publicKey = await webcrypto.subtle.exportKey('raw', keypair.publicKey)
-            const privateKey = await webcrypto.subtle.exportKey('pkcs8', keypair.privateKey)
+            const publicKey = await webcrypto.subtle.exportKey(
+                'raw',
+                keypair.publicKey
+            )
+            const privateKey = await webcrypto.subtle.exportKey(
+                'pkcs8',
+                keypair.privateKey
+            )
 
             console.log(JSON.stringify({
                 publicKey: formatOutput(new Uint8Array(publicKey), format),
@@ -110,8 +156,14 @@ async function keysCommand (args:{
                 ['sign', 'verify']
             )
 
-            const publicKey = await webcrypto.subtle.exportKey('spki', keypair.publicKey)
-            const privateKey = await webcrypto.subtle.exportKey('pkcs8', keypair.privateKey)
+            const publicKey = await webcrypto.subtle.exportKey(
+                'spki',
+                keypair.publicKey
+            )
+            const privateKey = await webcrypto.subtle.exportKey(
+                'pkcs8',
+                keypair.privateKey
+            )
 
             console.log(JSON.stringify({
                 publicKey: formatOutput(new Uint8Array(publicKey), format),
@@ -152,6 +204,27 @@ async function encodeCommand (
         return output
     } catch (err) {
         console.error(chalk.red('Error encoding:'), err)
+        process.exit(1)
+    }
+}
+
+/**
+ * Decode a string from a given format to UTF-8.
+ */
+async function decodeCommand (
+    input:string,
+    inputFormat:u.SupportedEncodings
+):Promise<string> {
+    try {
+        // Decode from the input format to Uint8Array
+        const bytes = u.fromString(input, inputFormat)
+
+        // Convert to UTF-8 string
+        const output = u.toString(bytes, 'utf8')
+
+        return output
+    } catch (err) {
+        console.error(chalk.red('Error decoding:'), err)
         process.exit(1)
     }
 }
