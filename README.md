@@ -46,7 +46,8 @@ npx crypt keys
 
 This will print a JSON string with `{ publickKey, privateKey }` to `stdout`.
 The default string encoding is `base58btc`. You can pass in a different encoding
-to use for the output with the `-f` or `--format` option.
+to use for the output with the `-f` or `--format` option, or use separate
+`--public` and `--private` options to encode each key differently.
 
 ```sh
 # Generate Ed25519 keypair
@@ -54,6 +55,12 @@ npx crypt keys
 
 # Generate RSA keypair in base58btc format
 npx crypt keys rsa --format base58btc
+
+# Generate keypair with public key as DID and private key as base64url
+npx crypt keys --public did --private base64url
+
+# Generate keypair with DID format for public key only
+npx crypt keys --public did
 
 # Convert between encoding formats via stdin
 echo "Hello World" | npx crypt encode base64
@@ -84,7 +91,7 @@ npx crypt encode --help
 
 Generate a new cryptographic keypair, by default `ed25519`.
 Output is a JSON string of `{ publicKey, privateKey }`, where each key
-is encoded as `base58`.
+is encoded as `base58btc` by default.
 
 
 #### Arguments
@@ -95,12 +102,22 @@ is encoded as `base58`.
 
 #### Options
 
-* `-f, --format` - Output format for the keys (default: `base58btc`)
+* `-f, --format` - Output format for both keys (default: `base58btc`)
   - `base58btc` - Base58 with multibase prefix (`z`)
   - `base64` - Standard base64 encoding
   - `base64pad` - Padded base64 encoding
   - `hex` - Hexadecimal encoding
   - `base64url` - URL-safe base64 encoding
+  - `did` - Decentralized identifier format (`did:key:z...`)
+
+* `--public` - Output format for the public key only
+  - Accepts same values as `--format`
+  - Overrides `--format` for public key
+
+* `--private` - Output format for the private key only
+  - Accepts: `base58btc`, `base64`, `base64pad`, `hex`, `base64url`
+  - Overrides `--format` for private key
+  - Note: DID format not supported for private keys
 
 #### `keys` Example
 
@@ -113,6 +130,12 @@ npx crypt keys rsa --format hex
 
 # Generate Ed25519 keypair in base64pad
 npx crypt keys ed25519 -f base64pad
+
+# Generate keypair with public key as DID and private key as base64url
+npx crypt keys --public did --private base64url
+
+# Generate keypair with public key as DID, private key uses default format
+npx crypt keys --public did
 ```
 
 ---

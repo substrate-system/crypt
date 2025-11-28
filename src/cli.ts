@@ -36,16 +36,28 @@ await yargs(hideBin(process.argv))
                 })
                 .option('format', {
                     alias: 'f',
-                    describe: 'Output format for the keys',
+                    describe: 'Output format for both keys',
                     type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc'],
+                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc', 'did'],
                     default: 'base58btc'
+                })
+                .option('public', {
+                    describe: 'Output format for the public key',
+                    type: 'string',
+                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc', 'did']
+                })
+                .option('private', {
+                    describe: 'Output format for the private key',
+                    type: 'string',
+                    choices: ['base64', 'base64pad', 'hex', 'base64url', 'base58btc']
                 })
         },
         async (argv) => {
             await keysCommand({
                 algorithm: argv.algorithm as 'ed25519' | 'rsa',
-                format: argv.format as u.SupportedEncodings
+                format: argv.format as u.SupportedEncodings | 'did',
+                publicFormat: argv.public as u.SupportedEncodings | 'did' | undefined,
+                privateFormat: argv.private as u.SupportedEncodings | undefined
             })
         }
     )
@@ -116,9 +128,13 @@ await yargs(hideBin(process.argv))
  */
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
-    format?:u.SupportedEncodings
+    format?:u.SupportedEncodings | 'did',
+    publicFormat?:u.SupportedEncodings | 'did',
+    privateFormat?:u.SupportedEncodings
 } = { algorithm: 'ed25519', format: 'base58btc' }) {
-    const format = args.format || 'base58btc'
+    // Use separate formats if provided, otherwise fall back to format
+    const publicFormat = args.publicFormat || args.format || 'base58btc'
+    const privateFormat = args.privateFormat || args.format || 'base58btc'
 
     try {
         if (args.algorithm === 'ed25519') {
@@ -141,8 +157,8 @@ async function keysCommand (args:{
             )
 
             console.log(JSON.stringify({
-                publicKey: formatOutput(new Uint8Array(publicKey), format),
-                privateKey: formatOutput(new Uint8Array(privateKey), format)
+                publicKey: formatOutput(new Uint8Array(publicKey), publicFormat),
+                privateKey: formatOutput(new Uint8Array(privateKey), privateFormat as u.SupportedEncodings | 'did')
             }))
         } else if (args.algorithm === 'rsa') {
             const keypair = await webcrypto.subtle.generateKey(
@@ -166,8 +182,8 @@ async function keysCommand (args:{
             )
 
             console.log(JSON.stringify({
-                publicKey: formatOutput(new Uint8Array(publicKey), format),
-                privateKey: formatOutput(new Uint8Array(privateKey), format)
+                publicKey: formatOutput(new Uint8Array(publicKey), publicFormat),
+                privateKey: formatOutput(new Uint8Array(privateKey), privateFormat as u.SupportedEncodings | 'did')
             }))
         }
     } catch (err) {
@@ -177,9 +193,13 @@ async function keysCommand (args:{
 }
 
 /**
- * Format output with multibase prefix for base58btc.
+ * Format output with multibase prefix for base58btc or DID format.
  */
-function formatOutput (bytes:Uint8Array, format:u.SupportedEncodings):string {
+function formatOutput (bytes:Uint8Array, format:u.SupportedEncodings | 'did'):string {
+    if (format === 'did') {
+        // DID format: did:key:z<base58btc-encoded-key>
+        return 'did:key:z' + u.toString(bytes, 'base58btc')
+    }
     if (format === 'base58btc') {
         return 'z' + u.toString(bytes, format)
     }
