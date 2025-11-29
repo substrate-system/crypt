@@ -107,17 +107,17 @@ test('encode command converts UTF-8 to base64', async t => {
     t.equal(output, expected, 'should correctly encode UTF-8 to base64')
 })
 
-test('encode command converts UTF-8 to base58btc by default', async t => {
+test('encode command converts UTF-8 to base64url by default', async t => {
     const input = 'Hello World'
     const result = await runCLIWithStdin(['encode'], input)
 
     t.equal(result.code, 0, 'command should exit with code 0')
 
     const output = result.stdout.trim()
-    const expected = u.toString(u.fromString(input, 'utf8'), 'base58btc')
+    const expected = u.toString(u.fromString(input, 'utf8'), 'base64url')
 
     t.equal(output, expected,
-        'should correctly encode UTF-8 to base58btc by default')
+        'should correctly encode UTF-8 to base64url by default')
 })
 
 test('encode command converts base64 to hex', async t => {
@@ -366,7 +366,7 @@ test('DID decoded public key can be re-encoded to same DID', async t => {
 
 // Test multikey format
 test('keys command outputs multikey format with --public multikey', async t => {
-    const result = await runCLI(['keys', 'ed25519', '--public', 'multikey'])
+    const result = await runCLI(['keys', 'ed25519', '--public', 'multi'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
 
@@ -380,7 +380,7 @@ test('keys command outputs multikey format with --public multikey', async t => {
 test('multikey format is DID without the did:key: prefix', async t => {
     // Generate both DID and multikey formats
     const resultDid = await runCLI(['keys', 'ed25519', '--public', 'did'])
-    const resultMultikey = await runCLI(['keys', 'ed25519', '--public', 'multikey'])
+    const resultMultikey = await runCLI(['keys', 'ed25519', '--public', 'multi'])
 
     t.equal(resultDid.code, 0, 'DID command should exit with code 0')
     t.equal(resultMultikey.code, 0, 'multikey command should exit with code 0')
@@ -405,7 +405,7 @@ test('multikey format is DID without the did:key: prefix', async t => {
 })
 
 test('multikey format works with --format multikey', async t => {
-    const result = await runCLI(['keys', 'ed25519', '--format', 'multikey'])
+    const result = await runCLI(['keys', 'ed25519', '--format', 'multi'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
 
@@ -418,7 +418,7 @@ test('multikey format works with --format multikey', async t => {
 })
 
 test('RSA multikey has different prefix than Ed25519', async t => {
-    const result = await runCLI(['keys', 'rsa', '--public', 'multikey'])
+    const result = await runCLI(['keys', 'rsa', '--public', 'multi'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
 
@@ -430,6 +430,71 @@ test('RSA multikey has different prefix than Ed25519', async t => {
         'RSA multikey should not start with z6Mk')
     t.ok(multikey.startsWith('z'),
         'RSA multikey should still use base58btc (z prefix)')
+})
+
+// Test multibase input format
+test('encode command handles multibase input with -i multi', async t => {
+    // First create a multibase-encoded string
+    const input = 'Hello World'
+    const resultMulti = await runCLIWithStdin(['encode', 'base64', '--multi'], input)
+
+    t.equal(resultMulti.code, 0, 'multibase encode should exit with code 0')
+
+    const multibaseString = resultMulti.stdout.trim()
+    t.ok(multibaseString.startsWith('m'), 'should have base64 multibase prefix')
+
+    // Now decode it using -i multi
+    const resultDecode = await runCLIWithStdin(['encode', 'hex', '-i', 'multi'], multibaseString)
+
+    t.equal(resultDecode.code, 0, 'multibase decode should exit with code 0')
+
+    const hexOutput = resultDecode.stdout.trim()
+    const expected = u.toString(u.fromString(input, 'utf8'), 'hex')
+
+    t.equal(hexOutput, expected, 'should correctly decode multibase input')
+})
+
+test('encode command handles base58btc multibase input', async t => {
+    const input = 'zJxF12TrwUP45BMd'
+    const result = await runCLIWithStdin(['encode', 'hex', '-i', 'multi'], input)
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = result.stdout.trim()
+    const expected = '48656c6c6f20576f726c64'
+
+    t.equal(output, expected, 'should correctly decode base58btc multibase to hex')
+})
+
+test('encode command handles hex multibase input', async t => {
+    const input = 'f48656c6c6f20576f726c64'
+    const result = await runCLIWithStdin(['encode', 'utf8', '-i', 'multi'], input)
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = result.stdout.trim()
+
+    t.equal(output, 'Hello World', 'should correctly decode hex multibase to utf8')
+})
+
+test('encode command handles multikey format input', async t => {
+    // Generate a multikey
+    const keyResult = await runCLI(['keys', 'ed25519', '--public', 'multi'])
+    t.equal(keyResult.code, 0, 'keys command should exit with code 0')
+
+    const keyOutput = JSON.parse(keyResult.stdout.trim())
+    const multikey = keyOutput.publicKey
+
+    // Convert multikey to hex using -i multi
+    const result = await runCLIWithStdin(['encode', 'hex', '-i', 'multi'], multikey)
+
+    t.equal(result.code, 0, 'encode command should exit with code 0')
+
+    const hexOutput = result.stdout.trim()
+
+    // The hex output should start with the Ed25519 multicodec prefix (ed01)
+    t.ok(hexOutput.startsWith('ed01'),
+        'converted multikey should start with ed01 multicodec prefix')
 })
 
 /**

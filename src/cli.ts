@@ -40,14 +40,14 @@ await yargs(hideBin(process.argv))
                     describe: 'Output format for both keys',
                     type: 'string',
                     choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did', 'multikey'],
-                    default: 'base58btc'
+                        'base58btc', 'did', 'multi'],
+                    default: 'multi'
                 })
                 .option('public', {
                     describe: 'Output format for the public key',
                     type: 'string',
                     choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did', 'multikey']
+                        'base58btc', 'did', 'multi']
                 })
                 .option('private', {
                     describe: 'Output format for the private key',
@@ -65,8 +65,8 @@ await yargs(hideBin(process.argv))
         async (argv) => {
             await keysCommand({
                 algorithm: argv.algorithm as 'ed25519'|'rsa',
-                format: argv.format as u.SupportedEncodings|'did'|'multikey',
-                publicFormat: argv.public as u.SupportedEncodings|'did'|'multikey'|undefined,
+                format: argv.format as u.SupportedEncodings|'did'|'multi',
+                publicFormat: argv.public as u.SupportedEncodings|'did'|'multi'|undefined,
                 privateFormat: argv.private as u.SupportedEncodings|undefined,
                 useMultibase: argv.multi as boolean
             })
@@ -81,15 +81,15 @@ await yargs(hideBin(process.argv))
                     describe: 'The desired output format',
                     type: 'string',
                     choices: ['base64', 'hex', 'base64url', 'base58btc',
-                        'utf8', 'ascii'],
-                    default: 'base58btc'
+                        'utf8', 'ascii', 'multi'],
+                    default: 'base64url'
                 })
                 .option('input-format', {
                     alias: 'i',
                     describe: 'The format of the input string',
                     type: 'string',
                     choices: ['base64', 'hex', 'base64url', 'base58btc',
-                        'utf8', 'ascii'],
+                        'utf8', 'ascii', 'multi'],
                     default: 'utf8'
                 })
                 .option('multi', {
@@ -105,7 +105,7 @@ await yargs(hideBin(process.argv))
 
             const result = await encodeCommand(
                 input,
-                argv['input-format'] as u.SupportedEncodings,
+                argv['input-format'] as u.SupportedEncodings|'multi',
                 argv['output-format'] as u.SupportedEncodings,
                 argv.multi as boolean
             )
@@ -121,7 +121,7 @@ await yargs(hideBin(process.argv))
                     describe: 'The format of the input string',
                     type: 'string',
                     choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'ascii'],
+                        'base58btc', 'ascii', 'multi'],
                     default: 'base64'
                 })
         },
@@ -146,14 +146,18 @@ await yargs(hideBin(process.argv))
  */
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
-    format?:u.SupportedEncodings|'did'|'multikey',
-    publicFormat?:u.SupportedEncodings|'did'|'multikey',
+    format?:u.SupportedEncodings|'did'|'multi',
+    publicFormat?:u.SupportedEncodings|'did'|'multi',
     privateFormat?:u.SupportedEncodings,
     useMultibase?:boolean
-} = { algorithm: 'ed25519', format: 'base58btc' }) {
+} = { algorithm: 'ed25519', format: 'multi' }) {
     // Use separate formats if provided, otherwise fall back to format
-    const publicFormat = args.publicFormat || args.format || 'base58btc'
-    const privateFormat = args.privateFormat || args.format || 'base58btc'
+    const publicFormat = args.publicFormat || args.format || 'multi'
+    // Private keys can't use 'did' or 'multi' format, fall back to base58btc
+    let privateFormat = args.privateFormat || args.format || 'multi'
+    if (privateFormat === 'did' || privateFormat === 'multi') {
+        privateFormat = 'base58btc'
+    }
     const useMultibase = args.useMultibase || false
 
     try {
@@ -185,7 +189,7 @@ async function keysCommand (args:{
                 ),
                 privateKey: await formatOutput(
                     new Uint8Array(privateKey),
-                    privateFormat as u.SupportedEncodings|'did'|'multikey',
+                    privateFormat as u.SupportedEncodings|'did'|'multi',
                     useMultibase,
                     'ed25519'
                 )
@@ -220,7 +224,7 @@ async function keysCommand (args:{
                 ),
                 privateKey: await formatOutput(
                     new Uint8Array(privateKey),
-                    privateFormat as u.SupportedEncodings|'did'|'multikey',
+                    privateFormat as u.SupportedEncodings|'did'|'multi',
                     useMultibase,
                     'rsa'
                 )
@@ -251,11 +255,11 @@ function getMultibasePrefix (format:u.SupportedEncodings):string {
 }
 
 /**
- * Format output with multibase prefix for base58btc, DID, or multikey format.
+ * Format output with multibase prefix for base58btc, DID, or multi format.
  */
 async function formatOutput (
     bytes:Uint8Array,
-    format:u.SupportedEncodings|'did'|'multikey',
+    format:u.SupportedEncodings|'did'|'multi',
     useMultibase = false,
     keyType?:'ed25519'|'rsa'
 ):Promise<string> {
@@ -263,7 +267,7 @@ async function formatOutput (
         return await publicKeyToDid(bytes, keyType)
     }
 
-    if (format === 'multikey') {
+    if (format === 'multi') {
         // Multikey format: multicodec prefix + base58btc encoded
         // For Ed25519: 0xed01, For RSA: 0x1205
         const did = await publicKeyToDid(bytes, keyType)
@@ -288,17 +292,57 @@ async function formatOutput (
 }
 
 /**
+ * Detect the encoding format from a multibase prefix.
+ * @see https://github.com/multiformats/multibase
+ */
+function detectMultibaseFormat (input:string):{
+    format:u.SupportedEncodings,
+    data:string
+} {
+    if (input.length === 0) {
+        throw new Error('Empty input string')
+    }
+
+    const prefix = input[0]
+    const data = input.slice(1)
+
+    const formatMap:Record<string, u.SupportedEncodings> = {
+        m: 'base64',
+        M: 'base64pad',
+        u: 'base64url',
+        U: 'base64urlpad',
+        z: 'base58btc',
+        f: 'hex'
+    }
+
+    const format = formatMap[prefix]
+    if (!format) {
+        throw new Error(`Unknown multibase prefix: ${prefix}`)
+    }
+
+    return { format, data }
+}
+
+/**
  * Encode a string in one format to a different format.
  */
 async function encodeCommand (
     input:string,
-    inputFormat:u.SupportedEncodings,
+    inputFormat:u.SupportedEncodings|'multi',
     outputFormat:u.SupportedEncodings,
     useMultibase = false
 ):Promise<string> {
     try {
-        // First decode from the input format to Uint8Array
-        const bytes = u.fromString(input, inputFormat)
+        let bytes:Uint8Array
+
+        // Handle multibase input format
+        if (inputFormat === 'multi') {
+            const { format, data } = detectMultibaseFormat(input)
+            bytes = u.fromString(data, format)
+        } else {
+            // First decode from the input format to Uint8Array
+            bytes = u.fromString(input, inputFormat)
+        }
 
         // Then encode to the output format
         const output = u.toString(bytes, outputFormat)

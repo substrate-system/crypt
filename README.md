@@ -208,6 +208,9 @@ echo "Hello World" | npx crypt encode hex -m
 
 echo "Hello World" | npx crypt encode base64url --multi
 # => uSGVsbG8gV29ybGQ
+
+# convert "multikey" format to hex format
+echo "z6MkiLr..." | npx crypt encode hex -i multi
 ```
 
 ---
