@@ -92,11 +92,24 @@ await yargs(hideBin(process.argv))
                         'utf8', 'ascii', 'multi'],
                     default: 'utf8'
                 })
+                .option('type', {
+                    alias: 't',
+                    describe: 'Key type (required when output-format is multi)',
+                    type: 'string',
+                    choices: ['ed25519', 'rsa']
+                })
                 .option('multi', {
                     alias: 'm',
                     describe: 'Use multibase encoding with prefixes',
                     type: 'boolean',
                     default: false
+                })
+                .check((argv) => {
+                    if (argv['output-format'] === 'multi' && !argv.type) {
+                        throw new Error('--type is required when ' +
+                            'output-format is "multi"')
+                    }
+                    return true
                 })
         },
         async (argv) => {
@@ -106,8 +119,9 @@ await yargs(hideBin(process.argv))
             const result = await encodeCommand(
                 input,
                 argv['input-format'] as u.SupportedEncodings|'multi',
-                argv['output-format'] as u.SupportedEncodings,
-                argv.multi as boolean
+                argv['output-format'] as u.SupportedEncodings|'multi',
+                argv.multi as boolean,
+                argv.type as 'ed25519'|'rsa'|undefined
             )
             console.log(result)
         }
@@ -255,43 +269,6 @@ function getMultibasePrefix (format:u.SupportedEncodings):string {
 }
 
 /**
- * Format output with multibase prefix for base58btc, DID, or multi format.
- */
-async function formatOutput (
-    bytes:Uint8Array,
-    format:u.SupportedEncodings|'did'|'multi',
-    useMultibase = false,
-    keyType?:'ed25519'|'rsa'
-):Promise<string> {
-    if (format === 'did') {
-        return await publicKeyToDid(bytes, keyType)
-    }
-
-    if (format === 'multi') {
-        // Multikey format: multicodec prefix + base58btc encoded
-        // For Ed25519: 0xed01, For RSA: 0x1205
-        const did = await publicKeyToDid(bytes, keyType)
-        // Extract the multikey part (everything after "did:key:")
-        return did.replace('did:key:', '')
-    }
-
-    const encoded = u.toString(bytes, format as u.SupportedEncodings)
-
-    if (useMultibase) {
-        const prefix = getMultibasePrefix(format as u.SupportedEncodings)
-        return prefix + encoded
-    }
-
-    // Legacy behavior: always add 'z' prefix for base58btc when not
-    // using multibase flag
-    if (format === 'base58btc') {
-        return 'z' + encoded
-    }
-
-    return encoded
-}
-
-/**
  * Detect the encoding format from a multibase prefix.
  * @see https://github.com/multiformats/multibase
  */
@@ -329,8 +306,9 @@ function detectMultibaseFormat (input:string):{
 async function encodeCommand (
     input:string,
     inputFormat:u.SupportedEncodings|'multi',
-    outputFormat:u.SupportedEncodings,
-    useMultibase = false
+    outputFormat:u.SupportedEncodings|'multi',
+    useMultibase = false,
+    keyType?:'ed25519'|'rsa'
 ):Promise<string> {
     try {
         let bytes:Uint8Array
@@ -342,6 +320,22 @@ async function encodeCommand (
         } else {
             // First decode from the input format to Uint8Array
             bytes = u.fromString(input, inputFormat)
+        }
+
+        if (outputFormat === 'multi') {
+            // Strip multicodec prefix if present, since formatOutput will add it
+            // Ed25519 prefix: 0xed01, RSA prefix: 0x1205
+            let keyBytes = bytes
+            if (bytes.length > 2) {
+                // Check for Ed25519 multicodec prefix (0xed01)
+                if (bytes[0] === 0xed && bytes[1] === 0x01) {
+                    keyBytes = bytes.slice(2)
+                } else if (bytes[0] === 0x12 && bytes[1] === 0x05) {
+                    // Check for RSA multicodec prefix (0x1205)
+                    keyBytes = bytes.slice(2)
+                }
+            }
+            return formatOutput(keyBytes, 'multi', false, keyType)
         }
 
         // Then encode to the output format
@@ -378,4 +372,41 @@ async function decodeCommand (
         console.error(chalk.red('Error decoding:'), err)
         process.exit(1)
     }
+}
+
+/**
+ * Format output with multibase prefix for base58btc, DID, or multi format.
+ */
+async function formatOutput (
+    bytes:Uint8Array,
+    format:u.SupportedEncodings|'did'|'multi',
+    useMultibase = false,
+    keyType?:'ed25519'|'rsa'
+):Promise<string> {
+    if (format === 'did') {
+        return await publicKeyToDid(bytes, keyType)
+    }
+
+    if (format === 'multi') {
+        // Multikey format: multicodec prefix + base58btc encoded
+        // For Ed25519: 0xed01, For RSA: 0x1205
+        const did = await publicKeyToDid(bytes, keyType)
+        // Extract the multikey part (everything after "did:key:")
+        return did.replace('did:key:', '')
+    }
+
+    const encoded = u.toString(bytes, format as u.SupportedEncodings)
+
+    if (useMultibase) {
+        const prefix = getMultibasePrefix(format as u.SupportedEncodings)
+        return prefix + encoded
+    }
+
+    // Legacy behavior: always add 'z' prefix for base58btc when not
+    // using multibase flag
+    if (format === 'base58btc') {
+        return 'z' + encoded
+    }
+
+    return encoded
 }

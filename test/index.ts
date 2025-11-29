@@ -497,6 +497,66 @@ test('encode command handles multikey format input', async t => {
         'converted multikey should start with ed01 multicodec prefix')
 })
 
+test('encode command converts hex to multi format with key type', async t => {
+    // Sample hex string representing an Ed25519 public key (32 bytes)
+    const input = '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const result = await runCLIWithStdin([
+        'encode',
+        'multi',
+        '-i',
+        'hex',
+        '--type',
+        'ed25519'
+    ], input)
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = result.stdout.trim()
+
+    // Multi format output for Ed25519 should start with z6Mk
+    t.ok(output.startsWith('z6Mk'),
+        'Ed25519 multikey format should start with z6Mk prefix')
+})
+
+test('encode command requires --type when output format is multi', async t => {
+    const input = '48656c6c6f20576f726c64'
+    const result = await runCLIWithStdin(['encode', 'multi', '-i', 'hex'], input)
+
+    t.ok(result.code !== 0, 'command should fail without --type')
+    t.ok(result.stderr.includes('--type is required'),
+        'error message should mention --type is required')
+})
+
+test('encode round-trip: multi -> hex -> multi preserves multikey', async t => {
+    // Start with a known multikey (Ed25519)
+    const originalMulti = 'z6Mkmy1ak2zS6hPohyNnPwMUDqpC3WE8wTR3Fcz5esUoCFNH'
+
+    // Convert multi -> hex
+    const hexResult = await runCLIWithStdin(['encode', 'hex', '-i', 'multi'], originalMulti)
+    t.equal(hexResult.code, 0, 'multi to hex conversion should succeed')
+    const hexValue = hexResult.stdout.trim()
+
+    // Verify hex includes the multicodec prefix
+    t.ok(hexValue.startsWith('ed01'),
+        'hex output should include Ed25519 multicodec prefix')
+
+    // Convert hex -> multi
+    const multiResult = await runCLIWithStdin([
+        'encode',
+        'multi',
+        '-i',
+        'hex',
+        '--type',
+        'ed25519'
+    ], hexValue)
+    t.equal(multiResult.code, 0, 'hex to multi conversion should succeed')
+    const finalMulti = multiResult.stdout.trim()
+
+    // Should match the original
+    t.equal(finalMulti, originalMulti,
+        'round-trip conversion should preserve the original multikey')
+})
+
 /**
  * Helper function to run the CLI command and capture output
  */
