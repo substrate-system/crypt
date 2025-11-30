@@ -240,3 +240,66 @@ echo "48656c6c6f20576f726c64" | npx crypt decode hex
 # Decode base58btc to UTF-8
 echo "JxF12TrwUP45BMd" | npx crypt decode base58btc
 ```
+
+## Key Format
+
+### Multikey
+
+This uses [Multikey format](https://www.w3.org/TR/cid-1.0/#Multikey) strings.
+[Multikey format](https://www.w3.org/TR/cid-1.0/#Multikey), is
+a generic, self-describing,
+[multicodec-based](https://www.w3.org/TR/cid-1.0/#multibase-0)
+public key encoding.
+
+```ts
+import { base58btc } from 'multiformats/bases/base58'
+import * as varint from "multiformats/src/varint"
+
+// Suppose you have a raw public-key Buffer/Uint8Array
+const rawKeyBytes = /* ... */
+
+// --- helper: varint-encoded multicodec prefix for ed25519-pub ---
+// multicodec code for ed25519-pub is 0xED (237).
+// varint encoding for 237 is two bytes: 0xED 0x01
+const ED25519_MULTICODEC_VARINT = Uint8Array.from([0xed, 0x01])
+const out = new Uint8Array(ED25519_MULTICODEC_VARINT.length + rawPubKey.length)
+out.set(ED25519_MULTICODEC_VARINT, 0)
+out.set(rawKeyBytes, ED25519_MULTICODEC_VARINT.length)
+
+// base58btc (multibase) encode
+// multiformats' base58btc.encode typically returns a string that already
+// uses the 'z'
+let encoded = base58btc.encode(out)
+encoded = encoded.startsWith('z') ? encoded : 'z' + encoded
+
+// This yields something like "z6Mk…", same style as in the DID doc
+console.log(encoded)
+
+/**
+ * Decode a Multikey multibase string (ed25519-pub) back to raw key bytes.
+ * Returns an object { algCode, rawKey } where algCode is the multicodec
+ * numeric code.
+ */
+function decodeMultikey (multibaseStr):{ } {
+  // Accept with/without leading 'z' — multiformats will accept without the explicit 'z' only if decoder used directly.
+  const cleaned = (multibaseStr.startsWith('z') ?
+    multibaseStr :
+    'z' + multibaseStr)
+  const decoded = base58btc.decode(cleaned)  // returns Uint8Array
+
+  // read varint (we know ed25519 varint is two bytes: 0xed 0x01)
+  // robust approach: parse varint; here we handle single or two-byte
+  // varints for small values
+  let i = 0
+  let code = 0
+  let shift = 0
+  while (i < decoded.length) {
+    const b = decoded[i++]
+    code |= (b & 0x7f) << shift
+    if ((b & 0x80) === 0) break
+    shift += 7
+  }
+  const rawKey = decoded.slice(i)  // remainder is the raw key bytes
+  return { multicodec: code, rawKey }
+}
+```

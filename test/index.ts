@@ -27,6 +27,19 @@ test('keys command generates RSA keypair when specified', async t => {
     const output = JSON.parse(result.stdout.trim())
     t.ok(output.publicKey, 'should have publicKey property')
     t.ok(output.privateKey, 'should have privateKey property')
+
+    // Verify it's actually an RSA key by checking the multikey encoding
+    // Convert the base58btc public key to hex to examine the multicodec prefix
+    const hexResult = await runCLIWithStdin(
+        ['encode', 'hex', '-i', 'multi'],
+        output.publicKey
+    )
+    t.equal(hexResult.code, 0, 'conversion to hex should succeed')
+
+    const hexKey = hexResult.stdout.trim()
+    // RSA keys use multicodec 0x1205
+    t.ok(hexKey.startsWith('1205'),
+        'RSA public key should have multicodec prefix 0x1205')
 })
 
 test('keys command outputs in base58btc format by default', async t => {
