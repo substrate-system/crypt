@@ -5,6 +5,7 @@ import { hideBin } from 'yargs/helpers'
 import { webcrypto } from '@substrate-system/one-webcrypto'
 import * as u from 'uint8arrays'
 import { publicKeyToDid } from '@substrate-system/keys/crypto'
+import * as multikey from '@substrate-system/multikey'
 import chalk from 'chalk'
 
 /**
@@ -21,6 +22,73 @@ async function readStdin ():Promise<string> {
         })
         process.stdin.on('error', reject)
     })
+}
+
+/**
+ * Extract raw RSA public key from SPKI format.
+ * SPKI structure contains algorithm identifier and other metadata.
+ * We need just the raw key bytes for multikey encoding.
+ */
+function extractRawRsaKey (spkiBytes:Uint8Array):Uint8Array {
+    // For RSA keys in SPKI format, the raw key is embedded in the BIT STRING
+    // We need to parse the ASN.1 structure to extract it
+    // This is a simplified parser that works for standard RSA SPKI keys
+
+    // Skip to the BIT STRING that contains the actual public key
+    // SPKI format: SEQUENCE { algorithm, publicKey BIT STRING }
+    let offset = 0
+
+    // Skip SEQUENCE tag and length
+    if (spkiBytes[offset] !== 0x30) {
+        throw new Error('Invalid SPKI format: expected SEQUENCE')
+    }
+    offset++
+
+    // Skip length bytes (can be 1-4 bytes)
+    const firstLengthByte = spkiBytes[offset++]
+    if (firstLengthByte & 0x80) {
+        const lengthOfLength = firstLengthByte & 0x7f
+        offset += lengthOfLength
+    }
+
+    // Skip algorithm identifier SEQUENCE
+    if (spkiBytes[offset] !== 0x30) {
+        throw new Error('Invalid SPKI format: expected algorithm SEQUENCE')
+    }
+    offset++
+    const algLengthByte = spkiBytes[offset++]
+    let algLength = algLengthByte
+    if (algLengthByte & 0x80) {
+        const lengthOfLength = algLengthByte & 0x7f
+        algLength = 0
+        for (let i = 0; i < lengthOfLength; i++) {
+            algLength = (algLength << 8) | spkiBytes[offset++]
+        }
+    }
+    offset += algLength
+
+    // Now we're at the BIT STRING containing the public key
+    if (spkiBytes[offset] !== 0x03) {
+        throw new Error('Invalid SPKI format: expected BIT STRING')
+    }
+    offset++
+
+    // Read BIT STRING length
+    const bitStringLengthByte = spkiBytes[offset++]
+    let bitStringLength = bitStringLengthByte
+    if (bitStringLengthByte & 0x80) {
+        const lengthOfLength = bitStringLengthByte & 0x7f
+        bitStringLength = 0
+        for (let i = 0; i < lengthOfLength; i++) {
+            bitStringLength = (bitStringLength << 8) | spkiBytes[offset++]
+        }
+    }
+
+    // Skip the "number of unused bits" byte (should be 0)
+    offset++
+
+    // The remaining bytes are the actual RSA public key in PKCS#1 format
+    return spkiBytes.slice(offset)
 }
 
 await yargs(hideBin(process.argv))
@@ -163,7 +231,7 @@ async function keysCommand (args:{
     format?:u.SupportedEncodings|'did'|'multi',
     publicFormat?:u.SupportedEncodings|'did'|'multi',
     privateFormat?:u.SupportedEncodings,
-    useMultibase?:boolean
+   useMultibase?:boolean
 } = { algorithm: 'ed25519', format: 'multi' }) {
     // Use separate formats if provided, otherwise fall back to format
     const publicFormat = args.publicFormat || args.format || 'multi'
@@ -199,13 +267,15 @@ async function keysCommand (args:{
                     new Uint8Array(publicKey),
                     publicFormat,
                     useMultibase,
-                    'ed25519'
+                    'ed25519',
+                    true
                 ),
                 privateKey: await formatOutput(
                     new Uint8Array(privateKey),
                     privateFormat as u.SupportedEncodings|'did'|'multi',
                     useMultibase,
-                    'ed25519'
+                    'ed25519',
+                    false
                 )
             }))
         } else if (args.algorithm === 'rsa') {
@@ -234,13 +304,15 @@ async function keysCommand (args:{
                     new Uint8Array(publicKey),
                     publicFormat,
                     useMultibase,
-                    'rsa'
+                    'rsa',
+                    true
                 ),
                 privateKey: await formatOutput(
                     new Uint8Array(privateKey),
                     privateFormat as u.SupportedEncodings|'did'|'multi',
                     useMultibase,
-                    'rsa'
+                    'rsa',
+                    false
                 )
             }))
         }
@@ -323,19 +395,21 @@ async function encodeCommand (
         }
 
         if (outputFormat === 'multi') {
-            // Strip multicodec prefix if present, since formatOutput will add it
-            // Ed25519 prefix: 0xed01, RSA prefix: 0x1205
+            // Strip multicodec prefix, since `formatOutput` will add it
+            // Ed25519 varint prefix: [237, 1] (0xED, 0x01)
+            // RSA varint prefix: [133, 36] (0x85, 0x24) encoding of 0x1205
             let keyBytes = bytes
             if (bytes.length > 2) {
-                // Check for Ed25519 multicodec prefix (0xed01)
+                // Check for Ed25519 multicodec prefix (varint: 0xED, 0x01)
                 if (bytes[0] === 0xed && bytes[1] === 0x01) {
                     keyBytes = bytes.slice(2)
-                } else if (bytes[0] === 0x12 && bytes[1] === 0x05) {
-                    // Check for RSA multicodec prefix (0x1205)
+                } else if (bytes[0] === 0x85 && bytes[1] === 0x24) {
+                    // Check for RSA multicodec prefix (varint: 0x85, 0x24)
                     keyBytes = bytes.slice(2)
                 }
             }
-            return formatOutput(keyBytes, 'multi', false, keyType)
+            // For encode command, we're not dealing with SPKI format
+            return formatOutput(keyBytes, 'multi', false, keyType, false)
         }
 
         // Then encode to the output format
@@ -381,18 +455,30 @@ async function formatOutput (
     bytes:Uint8Array,
     format:u.SupportedEncodings|'did'|'multi',
     useMultibase = false,
-    keyType?:'ed25519'|'rsa'
+    keyType?:'ed25519'|'rsa',
+    isPublicKey = false
 ):Promise<string> {
     if (format === 'did') {
-        return await publicKeyToDid(bytes, keyType)
+        // For DID format, we need raw key bytes
+        let keyBytes = bytes
+        if (keyType === 'rsa' && isPublicKey) {
+            // Extract raw key from SPKI format
+            keyBytes = extractRawRsaKey(bytes)
+        }
+        return await publicKeyToDid(keyBytes, keyType)
     }
 
     if (format === 'multi') {
-        // Multikey format: multicodec prefix + base58btc encoded
-        // For Ed25519: 0xed01, For RSA: 0x1205
-        const did = await publicKeyToDid(bytes, keyType)
-        // Extract the multikey part (everything after "did:key:")
-        return did.replace('did:key:', '')
+        // Multikey format: use the multikey package
+        let keyBytes = bytes
+        if (keyType === 'rsa' && isPublicKey) {
+            // Extract raw key from SPKI format
+            keyBytes = extractRawRsaKey(bytes)
+        }
+        if (!keyType) {
+            throw new Error('keyType is required for multikey format')
+        }
+        return multikey.encode(keyBytes, keyType)
     }
 
     const encoded = u.toString(bytes, format as u.SupportedEncodings)

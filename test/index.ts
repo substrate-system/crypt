@@ -37,9 +37,10 @@ test('keys command generates RSA keypair when specified', async t => {
     t.equal(hexResult.code, 0, 'conversion to hex should succeed')
 
     const hexKey = hexResult.stdout.trim()
-    // RSA keys use multicodec 0x1205
-    t.ok(hexKey.startsWith('1205'),
-        'RSA public key should have multicodec prefix 0x1205')
+    // RSA keys use multicodec 0x1205 (4613 in decimal)
+    // which is encoded as varint [133, 36] = 0x8524 in hex
+    t.ok(hexKey.startsWith('8524'),
+        'RSA public key should have multicodec prefix 0x8524 (varint encoding of 0x1205)')
 })
 
 test('keys command outputs in base58btc format by default', async t => {
