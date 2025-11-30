@@ -23,6 +23,8 @@ This exposes a command `crypt`.
   * [`keys [algorithm]`](#keys-algorithm)
   * [`encode [output-format]`](#encode-output-format)
   * [`decode [input-format]`](#decode-input-format)
+- [Key Format](#key-format)
+  * [Multikey](#multikey)
 
 <!-- tocstop -->
 
