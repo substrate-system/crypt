@@ -7,7 +7,7 @@ import * as u from 'uint8arrays'
 import { publicKeyToDid } from '@substrate-system/keys/crypto'
 import * as multikey from '@substrate-system/multikey'
 import chalk from 'chalk'
-import { writeFileSync } from 'fs'
+import { writeFileSync } from 'node:fs'
 
 /**
  * Convert PKCS#8 DER bytes to PEM format.
@@ -127,7 +127,7 @@ await yargs(hideBin(process.argv))
                 })
                 .option('output', {
                     alias: 'o',
-                    describe: 'Output file for private key (required for RSA unless using -f jwk)',
+                    describe: 'Output file for private key (required for RSA unless using -f jwk; optional for Ed25519)',
                     type: 'string'
                 })
                 .option('multi', {
@@ -231,7 +231,7 @@ await yargs(hideBin(process.argv))
 
 /**
  * Generate a new keypair.
- * For Ed25519: Private keys are exported in JWK format to stdout.
+ * For Ed25519: Private keys are exported in JWK format to stdout, or to a file if -o is specified.
  * For RSA: Private keys are exported as PKCS#8 PEM to a file (requires -o option),
  *          or as JWK to stdout if format is 'jwk'.
  */
@@ -266,34 +266,63 @@ async function keysCommand (args:{
                 keypair.privateKey
             )
 
-            if (publicFormat === 'jwk') {
-                // Export public key as JWK
-                const publicKey = await webcrypto.subtle.exportKey(
-                    'jwk',
-                    keypair.publicKey
-                )
+            if (args.output) {
+                // Write private key to file
+                writeFileSync(args.output, JSON.stringify(privateKey, null, 2), 'utf8')
 
-                console.log(JSON.stringify({
-                    publicKey,
-                    privateKey
-                }))
+                // Output only public key to stdout
+                if (publicFormat === 'jwk') {
+                    const publicKey = await webcrypto.subtle.exportKey(
+                        'jwk',
+                        keypair.publicKey
+                    )
+                    console.log(JSON.stringify({ publicKey }))
+                } else {
+                    const publicKey = await webcrypto.subtle.exportKey(
+                        'raw',
+                        keypair.publicKey
+                    )
+                    console.log(JSON.stringify({
+                        publicKey: await formatOutput(
+                            new Uint8Array(publicKey),
+                            publicFormat,
+                            useMultibase,
+                            'ed25519',
+                            true
+                        )
+                    }))
+                }
             } else {
-                // Export public key as raw bytes
-                const publicKey = await webcrypto.subtle.exportKey(
-                    'raw',
-                    keypair.publicKey
-                )
+                // Output both keys to stdout
+                if (publicFormat === 'jwk') {
+                    // Export public key as JWK
+                    const publicKey = await webcrypto.subtle.exportKey(
+                        'jwk',
+                        keypair.publicKey
+                    )
 
-                console.log(JSON.stringify({
-                    publicKey: await formatOutput(
-                        new Uint8Array(publicKey),
-                        publicFormat,
-                        useMultibase,
-                        'ed25519',
-                        true
-                    ),
-                    privateKey
-                }))
+                    console.log(JSON.stringify({
+                        publicKey,
+                        privateKey
+                    }))
+                } else {
+                    // Export public key as raw bytes
+                    const publicKey = await webcrypto.subtle.exportKey(
+                        'raw',
+                        keypair.publicKey
+                    )
+
+                    console.log(JSON.stringify({
+                        publicKey: await formatOutput(
+                            new Uint8Array(publicKey),
+                            publicFormat,
+                            useMultibase,
+                            'ed25519',
+                            true
+                        ),
+                        privateKey
+                    }))
+                }
             }
         } else if (args.algorithm === 'rsa') {
             const keypair = await webcrypto.subtle.generateKey(

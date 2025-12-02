@@ -47,31 +47,27 @@ npx crypt keys
 
 ### Generate and Encode Keys
 
-This will print a JSON string with `{ publickKey, privateKey }` to `stdout`.
-The default string encoding is `base58btc`. You can pass in a different encoding
-to use for the output with the `-f` or `--format` option, or use separate
-`--public` and `--private` options to encode each key differently.
+For **Ed25519** keys, this will print a JSON string with
+`{ publicKey, privateKey }` to `stdout`.
+For **RSA** keys, the private key is written to a file (requires `-o` option)
+and the public key is printed to `stdout`.
 
-Create a keypair with `base64` encoded private key, and DID format public key:
-
-```sh
-npx crypt keys -f base64 --public did
-```
-
----
+The default output format is `multi` (multikey format).
+You can pass in a different encoding to use for the output with
+the `-f` or `--format` option.
 
 ```sh
-# Generate Ed25519 keypair
+# Generate Ed25519 keypair (outputs both keys to stdout)
 npx crypt keys
 
-# Generate RSA keypair in base58btc format
-npx crypt keys rsa --format base58btc
+# Generate RSA keypair, write private key to file
+npx crypt keys rsa -o private.pem
 
-# Generate keypair with public key as DID and private key as base64url
-npx crypt keys --public did --private base64url
+# Generate RSA keypair in JWK format (outputs both keys to stdout)
+npx crypt keys rsa -f jwk
 
-# Generate keypair with DID format for public key only
-npx crypt keys --public did
+# Generate Ed25519 keypair with DID format
+npx crypt keys -f did
 
 # Convert between encoding formats via stdin
 echo "Hello World" | npx crypt encode base64
@@ -83,6 +79,7 @@ echo "SGVsbG8gV29ybGQ" | npx crypt encode utf8 -i base64
 echo "SGVsbG8gV29ybGQ" | npx crypt encode hex -i base64
 # => 48656c6c6f20576f726c64
 ```
+
 
 ### Show Help Text
 
@@ -96,14 +93,20 @@ npx crypt encode --help
 
 ---
 
+
 ## Commands
 
 ### `keys [algorithm]`
 
 Generate a new cryptographic keypair, by default `ed25519`.
-Output is a JSON string of `{ publicKey, privateKey }`, where each key
-is encoded as `base58btc` by default.
 
+**Ed25519 keys**: Output is a JSON string of `{ publicKey, privateKey }`
+to stdout. Private keys are in JWK format. If `-o` is specified, the
+private key is written to the file and only the public key is printed to stdout.
+
+**RSA keys**: Requires `-o` option to specify output file for the private key
+(in PKCS#8 PEM format), unless using `-f jwk` which outputs both keys as
+JSON to stdout.
 
 #### Arguments
 
@@ -113,53 +116,64 @@ is encoded as `base58btc` by default.
 
 #### Options
 
-* `-f, --format` - Output format for both keys (default: `base58btc`)
+* `-f, --format` - Output format for public key (default: `multi`)
+  - `multi` - Multikey format with multibase encoding
   - `base58btc` - Base58 with multibase prefix (`z`)
   - `base64` - Standard base64 encoding
   - `base64pad` - Padded base64 encoding
   - `hex` - Hexadecimal encoding
   - `base64url` - URL-safe base64 encoding
   - `did` - Decentralized identifier format (`did:key:z...`)
+  - `jwk` - JSON Web Key format (outputs both public and private keys)
+
+* `-o, --output` - Output file for private key
+  - **Required for RSA** (unless using `-f jwk`)
+  - Optional for Ed25519
+    (if specified, private key goes to file instead of stdout)
+  - RSA private keys are written as PKCS#8 PEM format
+  - Ed25519 private keys are written as JWK format
 
 * `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
-  - When enabled, adds the appropriate [multibase](https://github.com/multiformats/multibase)
-    prefix for the encoding format
+  - When enabled, adds the appropriate
+    [multibase](https://github.com/multiformats/multibase) prefix for the
+    encoding format
   - Prefixes: `m` (base64), `M` (base64pad), `u` (base64url),
     `U` (base64urlpad), `z` (base58btc), `f` (hex)
-
-* `--public` - Output format for the public key only
-  - Accepts same values as `--format`
-  - Overrides `--format` for public key
-
-* `--private` - Output format for the private key only
-  - Accepts: `base58btc`, `base64`, `base64pad`, `hex`, `base64url`
-  - Overrides `--format` for private key
-  - Note: DID format not supported for private keys
 
 #### `keys` Example
 
 ```sh
-# Generate Ed25519 keypair in base58btc (default)
+# Generate Ed25519 keypair in multikey format (default)
 npx crypt keys
+# => {"publicKey":"z6Mk...", "privateKey":{...JWK...}}
 
-# Generate RSA keypair in hexadecimal
-npx crypt keys rsa --format hex
+# Generate Ed25519 keypair in base58btc
+npx crypt keys -f base58btc
 
-# Generate Ed25519 keypair in base64pad
-npx crypt keys -f base64pad
+# Generate Ed25519 keypair in DID format
+npx crypt keys -f did
+# => {"publicKey":"did:key:z6Mk...", "privateKey":{...JWK...}}
 
-# Generate keypair with public key as DID and private key as base64url
-npx crypt keys --public did --private base64url
+# Generate Ed25519 keypair, save private key to file
+npx crypt keys -o private.json
+# => {"publicKey":"z6Mk..."}
+# (private.json contains the JWK)
 
-# Generate keypair with public key as DID, private key uses default format
-npx crypt keys --public did
+# Generate RSA keypair, save private key to file as PEM
+npx crypt keys rsa -o private.pem
+# => {"publicKey":"z5Tc..."}
+# (private.pem contains PKCS#8 PEM format)
+
+# Generate RSA keypair in JWK format (both keys to stdout)
+npx crypt keys rsa -f jwk
+# => {"publicKey":{...JWK...}, "privateKey":{...JWK...}}
 
 # Generate keypair with multibase encoding (adds prefixes)
 npx crypt keys --format hex --multi
-# => {"publicKey":"ff8291f2...", "privateKey":"f302e020..."}
+# => {"publicKey":"f8291f2...", "privateKey":{...JWK...}}
 
 npx crypt keys --format base64 -m
-# => {"publicKey":"mCKHyYn...", "privateKey":"mMC4AIA..."}
+# => {"publicKey":"mCKHyYn...", "privateKey":{...JWK...}}
 ```
 
 ---
@@ -283,7 +297,8 @@ console.log(encoded)
  * numeric code.
  */
 function decodeMultikey (multibaseStr):{ } {
-  // Accept with/without leading 'z' — multiformats will accept without the explicit 'z' only if decoder used directly.
+  // Accept with/without leading 'z' — multiformats will accept
+  // without the explicit 'z' only if decoder used directly.
   const cleaned = (multibaseStr.startsWith('z') ?
     multibaseStr :
     'z' + multibaseStr)
