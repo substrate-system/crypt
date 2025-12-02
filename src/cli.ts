@@ -7,6 +7,20 @@ import * as u from 'uint8arrays'
 import { publicKeyToDid } from '@substrate-system/keys/crypto'
 import * as multikey from '@substrate-system/multikey'
 import chalk from 'chalk'
+import { writeFileSync } from 'fs'
+
+/**
+ * Convert PKCS#8 DER bytes to PEM format.
+ */
+function pkcs8ToPem (der:Uint8Array):string {
+    const base64 = u.toString(der, 'base64')
+    const pem = [
+        '-----BEGIN PRIVATE KEY-----',
+        ...base64.match(/.{1,64}/g) || [],
+        '-----END PRIVATE KEY-----'
+    ].join('\n')
+    return pem
+}
 
 /**
  * Read all data from stdin.
@@ -105,23 +119,16 @@ await yargs(hideBin(process.argv))
                 })
                 .option('format', {
                     alias: 'f',
-                    describe: 'Output format for both keys',
-                    type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did', 'multi'],
-                    default: 'multi'
-                })
-                .option('public', {
                     describe: 'Output format for the public key',
                     type: 'string',
                     choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did', 'multi']
+                        'base58btc', 'did', 'multi', 'jwk'],
+                    default: 'multi'
                 })
-                .option('private', {
-                    describe: 'Output format for the private key',
-                    type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc']
+                .option('output', {
+                    alias: 'o',
+                    describe: 'Output file for private key (required for RSA unless using -f jwk)',
+                    type: 'string'
                 })
                 .option('multi', {
                     alias: 'm',
@@ -134,8 +141,7 @@ await yargs(hideBin(process.argv))
             await keysCommand({
                 algorithm: argv.algorithm as 'ed25519'|'rsa',
                 format: argv.format as u.SupportedEncodings|'did'|'multi',
-                publicFormat: argv.public as u.SupportedEncodings|'did'|'multi'|undefined,
-                privateFormat: argv.private as u.SupportedEncodings|undefined,
+                output: argv.output as string|undefined,
                 useMultibase: argv.multi as boolean
             })
         }
@@ -225,22 +231,24 @@ await yargs(hideBin(process.argv))
 
 /**
  * Generate a new keypair.
+ * For Ed25519: Private keys are exported in JWK format to stdout.
+ * For RSA: Private keys are exported as PKCS#8 PEM to a file (requires -o option),
+ *          or as JWK to stdout if format is 'jwk'.
  */
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
-    format?:u.SupportedEncodings|'did'|'multi',
-    publicFormat?:u.SupportedEncodings|'did'|'multi',
-    privateFormat?:u.SupportedEncodings,
+    format?:u.SupportedEncodings|'did'|'multi'|'jwk',
+    output?:string,
    useMultibase?:boolean
 } = { algorithm: 'ed25519', format: 'multi' }) {
-    // Use separate formats if provided, otherwise fall back to format
-    const publicFormat = args.publicFormat || args.format || 'multi'
-    // Private keys can't use 'did' or 'multi' format, fall back to base58btc
-    let privateFormat = args.privateFormat || args.format || 'multi'
-    if (privateFormat === 'did' || privateFormat === 'multi') {
-        privateFormat = 'base58btc'
-    }
+    const publicFormat = args.format || 'multi'
     const useMultibase = args.useMultibase || false
+
+    // For RSA, require output file unless format is 'jwk'
+    if (args.algorithm === 'rsa' && publicFormat !== 'jwk' && !args.output) {
+        console.error(chalk.red('Error: RSA keys require an output file. Use -o or --output to specify the private key file, or use -f jwk for JWK output.'))
+        process.exit(1)
+    }
 
     try {
         if (args.algorithm === 'ed25519') {
@@ -253,31 +261,40 @@ async function keysCommand (args:{
                 ['sign', 'verify']
             )
 
-            const publicKey = await webcrypto.subtle.exportKey(
-                'raw',
-                keypair.publicKey
-            )
             const privateKey = await webcrypto.subtle.exportKey(
-                'pkcs8',
+                'jwk',
                 keypair.privateKey
             )
 
-            console.log(JSON.stringify({
-                publicKey: await formatOutput(
-                    new Uint8Array(publicKey),
-                    publicFormat,
-                    useMultibase,
-                    'ed25519',
-                    true
-                ),
-                privateKey: await formatOutput(
-                    new Uint8Array(privateKey),
-                    privateFormat as u.SupportedEncodings|'did'|'multi',
-                    useMultibase,
-                    'ed25519',
-                    false
+            if (publicFormat === 'jwk') {
+                // Export public key as JWK
+                const publicKey = await webcrypto.subtle.exportKey(
+                    'jwk',
+                    keypair.publicKey
                 )
-            }))
+
+                console.log(JSON.stringify({
+                    publicKey,
+                    privateKey
+                }))
+            } else {
+                // Export public key as raw bytes
+                const publicKey = await webcrypto.subtle.exportKey(
+                    'raw',
+                    keypair.publicKey
+                )
+
+                console.log(JSON.stringify({
+                    publicKey: await formatOutput(
+                        new Uint8Array(publicKey),
+                        publicFormat,
+                        useMultibase,
+                        'ed25519',
+                        true
+                    ),
+                    privateKey
+                }))
+            }
         } else if (args.algorithm === 'rsa') {
             const keypair = await webcrypto.subtle.generateKey(
                 {
@@ -290,31 +307,49 @@ async function keysCommand (args:{
                 ['sign', 'verify']
             )
 
-            const publicKey = await webcrypto.subtle.exportKey(
-                'spki',
-                keypair.publicKey
-            )
-            const privateKey = await webcrypto.subtle.exportKey(
-                'pkcs8',
-                keypair.privateKey
-            )
-
-            console.log(JSON.stringify({
-                publicKey: await formatOutput(
-                    new Uint8Array(publicKey),
-                    publicFormat,
-                    useMultibase,
-                    'rsa',
-                    true
-                ),
-                privateKey: await formatOutput(
-                    new Uint8Array(privateKey),
-                    privateFormat as u.SupportedEncodings|'did'|'multi',
-                    useMultibase,
-                    'rsa',
-                    false
+            if (publicFormat === 'jwk') {
+                // Export as JWK to stdout
+                const publicKey = await webcrypto.subtle.exportKey(
+                    'jwk',
+                    keypair.publicKey
                 )
-            }))
+                const privateKey = await webcrypto.subtle.exportKey(
+                    'jwk',
+                    keypair.privateKey
+                )
+
+                console.log(JSON.stringify({
+                    publicKey,
+                    privateKey
+                }))
+            } else {
+                // Export public key as SPKI
+                const publicKey = await webcrypto.subtle.exportKey(
+                    'spki',
+                    keypair.publicKey
+                )
+
+                // Export as PKCS#8 PEM to file
+                const privateKey = await webcrypto.subtle.exportKey(
+                    'pkcs8',
+                    keypair.privateKey
+                )
+
+                // Write private key as PEM to file
+                const pem = pkcs8ToPem(new Uint8Array(privateKey))
+                writeFileSync(args.output!, pem, 'utf8')
+
+                // Output public key to stdout
+                console.log(JSON.stringify({
+                    publicKey: await formatOutput(
+                        new Uint8Array(publicKey),
+                        publicFormat,
+                        useMultibase,
+                        'rsa',
+                        true
+                    )
+                }))
+            }
         }
     } catch (err) {
         console.error(chalk.red('Error generating keypair:'), err)
