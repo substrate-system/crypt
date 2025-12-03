@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "description": "CLI tool for creating and ecoding keys",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cli.js",
   "types": "./dist/index.d.ts",
   "files": [
     "./dist/*"
@@ -12,15 +12,12 @@
     "crypt": "dist/cli.js"
   },
   "exports": {
-    ".": "./dist/index.js",
-    "./*": [
-      "./dist/*.js",
-      "./dist/*"
-    ]
+    ".": "./dist/cli.js",
+    "./*": "./dist/*.js"
   },
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
-    "test": "esbuild test/index.ts --platform=node --format=esm --keep-names --bundle --external:crypto --external:@substrate-system/keys/crypto | node --input-type=module",
+    "test": "esbuild test/index.ts --platform=node --format=esm --keep-names --bundle --external:crypto --external:@substrate-system/keys/crypto --external:dotenv --external:fs --external:path --external:os | node --input-type=module",
     "build-esm": "esbuild src/*.ts --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-esm",
     "toc": "markdown-toc --maxdepth 3 -i README.md",

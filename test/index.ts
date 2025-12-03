@@ -2,6 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import * as u from 'uint8arrays'
+import { keys, sign, encode, decode } from '../src/cli.js'
 
 const CLI_PATH = join(process.cwd(), 'dist', 'cli.js')
 
@@ -52,6 +53,38 @@ test('keys command generates RSA keypair with JWK format', async t => {
     t.ok(output.e, 'should have e (public exponent)')
     t.ok(output.p, 'should have p (first prime)')
     t.ok(output.q, 'should have q (second prime)')
+    t.ok(!output.publicKey, 'should not have separate publicKey field')
+    t.ok(!output.privateKey, 'should not have separate privateKey field')
+})
+
+test('keys command generates X25519 keypair by default in raw format', async t => {
+    const result = await runCLI(['keys', 'x25519'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+    t.ok(output.publicKey, 'should have publicKey property')
+    t.ok(output.privateKey, 'should have privateKey property')
+    t.ok(typeof output.publicKey === 'string',
+        'public key should be a string')
+    t.ok(typeof output.privateKey === 'string',
+        'private key should be a base64url string')
+    t.ok(!output.privateKey.includes('{'),
+        'private key should not be a JSON object')
+})
+
+test('keys command generates X25519 keypair in JWK format', async t => {
+    const result = await runCLI(['keys', 'x25519', '-f', 'jwk'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+
+    // Should return just the private key JWK (which contains public key in 'x')
+    t.equal(output.kty, 'OKP', 'should have kty OKP')
+    t.equal(output.crv, 'X25519', 'should have crv X25519')
+    t.ok(output.x, 'should have x (public key) component')
+    t.ok(output.d, 'should have d (private key) component')
     t.ok(!output.publicKey, 'should not have separate publicKey field')
     t.ok(!output.privateKey, 'should not have separate privateKey field')
 })
@@ -437,6 +470,223 @@ test('RSA JWK contains all required components', async t => {
     t.ok(jwk.d, 'should have d (private exponent)')
     t.ok(jwk.p, 'should have p (first prime)')
     t.ok(jwk.q, 'should have q (second prime)')
+})
+
+// Test the `sign` command
+test('sign command signs a string with a private key seed', async t => {
+    // First generate a keypair to get a private key seed
+    const keyResult = await runCLI(['keys', 'ed25519'])
+    t.equal(keyResult.code, 0, 'keys command should exit with code 0')
+
+    const keyOutput = JSON.parse(keyResult.stdout.trim())
+    const privateKeySeed = keyOutput.privateKey
+
+    // Sign a message
+    const message = 'my signed document'
+    const result = await runCLI(['sign', message, '-k', privateKeySeed])
+
+    t.equal(result.code, 0, 'sign command should exit with code 0')
+
+    const output = result.stdout.trim()
+    t.ok(output.length > 0, 'should output a signature')
+    // Ed25519 signatures are 64 bytes, so base64url encoded should be 86 characters (no padding)
+    t.ok(/^[A-Za-z0-9_-]+$/.test(output), 'signature should be base64url encoded')
+})
+
+test('sign command requires --key option', async t => {
+    const message = 'my signed document'
+    const result = await runCLI(['sign', message])
+
+    t.ok(result.code !== 0, 'should exit with non-zero code when key is missing')
+    t.ok(
+        result.stderr.includes('required') || result.stderr.includes('Missing'),
+        'should show error about missing key'
+    )
+})
+
+test('sign command shows help with --help flag', async t => {
+    const result = await runCLI(['sign', '--help'])
+
+    t.equal(result.code, 0, 'help command should exit with code 0')
+    t.ok(result.stdout.includes('sign'), 'should show command name')
+    t.ok(
+        result.stdout.includes('key') || result.stdout.includes('-k'),
+        'should mention key option'
+    )
+})
+
+test('sign command produces consistent signatures for same input', async t => {
+    // Generate a keypair
+    const keyResult = await runCLI(['keys', 'ed25519'])
+    t.equal(keyResult.code, 0, 'keys command should exit with code 0')
+
+    const keyOutput = JSON.parse(keyResult.stdout.trim())
+    const privateKeySeed = keyOutput.privateKey
+
+    const message = 'consistent message'
+
+    // Sign the same message twice
+    const result1 = await runCLI(['sign', message, '-k', privateKeySeed])
+    const result2 = await runCLI(['sign', message, '-k', privateKeySeed])
+
+    t.equal(result1.code, 0, 'first sign should succeed')
+    t.equal(result2.code, 0, 'second sign should succeed')
+
+    const sig1 = result1.stdout.trim()
+    const sig2 = result2.stdout.trim()
+
+    t.equal(sig1, sig2, 'signatures should be identical for same message and key')
+})
+
+test('sign command accepts message from stdin', async t => {
+    // Generate a keypair
+    const keyResult = await runCLI(['keys', 'ed25519'])
+    t.equal(keyResult.code, 0, 'keys command should exit with code 0')
+
+    const keyOutput = JSON.parse(keyResult.stdout.trim())
+    const privateKeySeed = keyOutput.privateKey
+
+    // Sign a message from stdin
+    const message = 'message from stdin'
+    const result = await runCLIWithStdin(['sign', '-k', privateKeySeed], message)
+
+    t.equal(result.code, 0, 'sign command should exit with code 0')
+
+    const output = result.stdout.trim()
+    t.ok(output.length > 0, 'should output a signature')
+    t.ok(/^[A-Za-z0-9_-]+$/.test(output), 'signature should be base64url encoded')
+})
+
+test('sign command with stdin produces same signature as positional argument', async t => {
+    // Generate a keypair
+    const keyResult = await runCLI(['keys', 'ed25519'])
+    t.equal(keyResult.code, 0, 'keys command should exit with code 0')
+
+    const keyOutput = JSON.parse(keyResult.stdout.trim())
+    const privateKeySeed = keyOutput.privateKey
+
+    const message = 'test message'
+
+    // Sign with positional argument
+    const result1 = await runCLI(['sign', message, '-k', privateKeySeed])
+    t.equal(result1.code, 0, 'positional argument sign should succeed')
+
+    // Sign with stdin
+    const result2 = await runCLIWithStdin(['sign', '-k', privateKeySeed], message)
+    t.equal(result2.code, 0, 'stdin sign should succeed')
+
+    const sig1 = result1.stdout.trim()
+    const sig2 = result2.stdout.trim()
+
+    t.equal(sig1, sig2, 'signatures should be identical regardless of input method')
+})
+
+test('sign command errors when both message and stdin are missing', async t => {
+    // This test would require TTY manipulation which is complex
+    // We'll test that the command handles empty stdin
+    const keyResult = await runCLI(['keys', 'ed25519'])
+    const keyOutput = JSON.parse(keyResult.stdout.trim())
+    const privateKeySeed = keyOutput.privateKey
+
+    // Provide empty stdin
+    const result = await runCLIWithStdin(['sign', '-k', privateKeySeed], '')
+
+    t.ok(result.code !== 0, 'should fail with empty message')
+})
+
+// ------------------------------
+// JS API Tests
+// ------------------------------
+
+test('JS API: keys() generates Ed25519 keypair by default', async t => {
+    const keypair = await keys()
+
+    t.ok(keypair.publicKey, 'should have publicKey property')
+    t.ok(keypair.privateKey, 'should have privateKey property')
+    t.ok(typeof keypair.publicKey === 'string', 'publicKey should be a string')
+    t.ok(typeof keypair.privateKey === 'string', 'privateKey should be a string')
+    if (typeof keypair.publicKey === 'string') {
+        t.ok(keypair.publicKey.startsWith('z6Mk'), 'publicKey should be in multikey format')
+    }
+})
+
+test('JS API: keys() generates X25519 keypair', async t => {
+    const keypair = await keys({ algorithm: 'x25519' })
+
+    t.ok(keypair.publicKey, 'should have publicKey property')
+    t.ok(keypair.privateKey, 'should have privateKey property')
+    t.ok(typeof keypair.publicKey === 'string', 'publicKey should be a string')
+    t.ok(typeof keypair.privateKey === 'string', 'privateKey should be a string')
+})
+
+test('JS API: keys() generates JWK format', async t => {
+    const jwk = await keys({ format: 'jwk' }) as Record<string, unknown>
+
+    t.equal(jwk.kty, 'OKP', 'should have kty OKP')
+    t.equal(jwk.crv, 'Ed25519', 'should have crv Ed25519')
+    t.ok(jwk.d, 'should have d (private key) component')
+    t.ok(jwk.x, 'should have x (public key) component')
+})
+
+test('JS API: sign() signs a message', async t => {
+    const keypair = await keys()
+    if (typeof keypair.privateKey === 'string') {
+        const message = 'test message'
+        const signature = await sign(message, { key: keypair.privateKey })
+
+        t.ok(signature, 'should return a signature')
+        t.ok(typeof signature === 'string', 'signature should be a string')
+        t.ok(/^[A-Za-z0-9_-]+$/.test(signature), 'signature should be base64url encoded')
+    }
+})
+
+test('JS API: sign() produces consistent signatures', async t => {
+    const keypair = await keys()
+    if (typeof keypair.privateKey === 'string') {
+        const message = 'consistent message'
+
+        const sig1 = await sign(message, { key: keypair.privateKey })
+        const sig2 = await sign(message, { key: keypair.privateKey })
+
+        t.equal(sig1, sig2, 'signatures should be identical for same message and key')
+    }
+})
+
+test('JS API: encode() converts UTF-8 to base64', async t => {
+    const input = 'Hello World'
+    const encoded = await encode(input, {
+        inputFormat: 'utf8',
+        outputFormat: 'base64'
+    })
+
+    t.ok(encoded, 'should return encoded string')
+    // Note: base64 encoding without padding
+    t.equal(encoded, 'SGVsbG8gV29ybGQ', 'should correctly encode to base64')
+})
+
+test('JS API: encode() converts base64 to hex', async t => {
+    const encoded = await encode('SGVsbG8gV29ybGQ=', {
+        inputFormat: 'base64',
+        outputFormat: 'hex'
+    })
+
+    t.equal(encoded, '48656c6c6f20576f726c64', 'should correctly convert to hex')
+})
+
+test('JS API: decode() decodes base64 to UTF-8', async t => {
+    const decoded = await decode('SGVsbG8gV29ybGQ=', {
+        inputFormat: 'base64'
+    })
+
+    t.equal(decoded, 'Hello World', 'should correctly decode to UTF-8')
+})
+
+test('JS API: decode() decodes hex to UTF-8', async t => {
+    const decoded = await decode('48656c6c6f20576f726c64', {
+        inputFormat: 'hex'
+    })
+
+    t.equal(decoded, 'Hello World', 'should correctly decode hex to UTF-8')
 })
 
 /**

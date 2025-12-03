@@ -21,6 +21,7 @@ This exposes a command `crypt`.
   * [Show Help Text](#show-help-text)
 - [Commands](#commands)
   * [`keys [algorithm]`](#keys-algorithm)
+  * [`sign [message]`](#sign-message)
   * [`encode [output-format]`](#encode-output-format)
   * [`decode [input-format]`](#decode-input-format)
 - [Key Format](#key-format)
@@ -53,6 +54,10 @@ For **Ed25519** keys, this will print a JSON string with
 - `publicKey` is in multikey format
 - `privateKey` is the base64url-encoded seed
 
+For **X25519** keys (used for key exchange/ECDH), output is similar to Ed25519:
+- `publicKey` is base64url-encoded
+- `privateKey` is the base64url-encoded seed
+
 For **RSA** keys, the private key is written to a file (requires `-o` option)
 and the public key is printed to `stdout` in multikey format.
 
@@ -63,14 +68,20 @@ the `-f` or `--format` option.
 # Generate Ed25519 keypair (outputs both keys to stdout)
 npx crypt keys
 
+# Generate X25519 keypair for key exchange
+npx crypt keys x25519
+
 # Generate RSA keypair, write private key to file
 npx crypt keys rsa -o private.pem
 
 # Generate RSA keypair in JWK format (outputs both keys to stdout)
 npx crypt keys rsa -f jwk
 
-# Generate Ed25519 keypair with DID format
-npx crypt keys -f did
+# Sign a message
+npx crypt sign "my document" -k <private-key-seed>
+
+# Sign from stdin
+echo "my document" | npx crypt sign -k <private-key-seed>
 
 # Convert between encoding formats via stdin
 echo "Hello World" | npx crypt encode base64
@@ -103,36 +114,42 @@ npx crypt encode --help
 
 Generate a new cryptographic keypair, by default `ed25519`.
 
-**Ed25519 keys**: Output is a JSON string of `{ publicKey, privateKey }`
+**Ed25519 keys** (signing): Output is a JSON string of `{ publicKey, privateKey }`
 to stdout. By default (`-f raw`), the public key is in multikey format and
 the private key is a base64url-encoded seed. Use `-f jwk` for JWK format.
 If `-o` is specified, the private key is written to the file and only the
 public key is printed to stdout.
 
-**RSA keys**: Requires `-o` option to specify output file for the private key
+**X25519 keys** (key exchange/ECDH): Similar to Ed25519, outputs
+`{ publicKey, privateKey }` to stdout. By default (`-f raw`), both keys are
+base64url-encoded. Use `-f jwk` for JWK format.
+
+**RSA keys** (signing): Requires `-o` option to specify output file for the private key
 (in PKCS#8 PEM format), unless using `-f jwk` which outputs both keys as
 JSON to stdout.
 
 #### Arguments
 
 * `algorithm` - The algorithm to use (default: `ed25519`)
-  - `ed25519` - Ed25519 elliptic curve
-  - `rsa` - RSA-PSS 2048-bit
+  - `ed25519` - Ed25519 elliptic curve (signing)
+  - `x25519` - X25519 elliptic curve (key exchange/ECDH)
+  - `rsa` - RSA-PSS 2048-bit (signing)
 
 #### Options
 
 * `-f, --format` - Output format (default: `raw`)
   - `raw` - **(default)** For Ed25519: public key in multikey format,
-    private key as base64url-encoded seed. For RSA: requires `-o` option.
+    private key as base64url-encoded seed. For X25519: both keys as
+    base64url-encoded strings. For RSA: requires `-o` option.
   - `jwk` - JSON Web Key format (outputs private key JWK,
-    which includes public key in `x` field for Ed25519)
+    which includes public key in `x` field for Ed25519 and X25519)
 
 * `-o, --output` - Output file for private key
   - **Required for RSA** (unless using `-f jwk`)
-  - Optional for Ed25519
+  - Optional for Ed25519 and X25519
     (if specified, private key goes to file instead of stdout)
   - RSA private keys are written as PKCS#8 PEM format
-  - Ed25519 private keys are written as base64url-encoded seed (default)
+  - Ed25519 and X25519 private keys are written as base64url-encoded seed (default)
     or JWK format (if using `-f jwk`)
 
 * `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
@@ -160,6 +177,16 @@ npx crypt keys -o private.txt
 # => {"publicKey":"z6Mk..."}
 # (private.txt contains the base64url-encoded seed)
 
+# Generate X25519 keypair for key exchange (default: raw format)
+npx crypt keys x25519
+# => {"publicKey":"B1UIJS3JEVkjr7uP1E1JWQ...","privateKey":"WCHnh8mcwxZ89Urp_i-F..."}
+# (both keys are base64url-encoded)
+
+# Generate X25519 keypair in JWK format
+npx crypt keys x25519 -f jwk
+# => {"key_ops":["deriveKey","deriveBits"],"ext":true,"crv":"X25519","d":"...","x":"...","kty":"OKP"}
+# (Returns private key JWK; public key is in the 'x' field)
+
 # Generate RSA keypair, save private key to file as PEM
 npx crypt keys rsa -o private.pem
 # => {"publicKey":"z5Tc..."}
@@ -170,6 +197,49 @@ npx crypt keys rsa -f jwk
 # => {...JWK with private key...}
 # (Returns private key JWK; public key components are included)
 ```
+
+---
+
+### `sign [message]`
+
+Sign a message with an Ed25519 private key. The message can be provided as a positional argument or read from stdin.
+
+#### Arguments
+
+* `message` - The message to sign (optional if using stdin)
+  - If omitted, the message will be read from stdin
+  - If provided as an argument, that takes precedence over stdin
+
+#### Options
+
+* `-k, --key` - **(required)** Private key seed (base64url-encoded)
+  - The private key seed as output by `crypt keys` in raw format
+  - This is the 'd' field from an Ed25519 JWK
+
+#### `sign` Example
+
+```sh
+# Generate a keypair first
+npx crypt keys
+# => {"publicKey":"z6Mk...","privateKey":"k7s0h9nK5oqRd4ip..."}
+
+# Sign a message using positional argument
+npx crypt sign "my signed document" -k k7s0h9nK5oqRd4ip_K8ow2RXZ4p3B5Mp3hguz7G9CMI
+# => jLYPhT1LAckU3WrcXlAPf4eaklfk8qTDyBf1otgqmr7Fx-YATTrZrLrlHYvNyl0EU5SF6URiKJtkyjeRGNe9AA
+
+# Sign a message from stdin
+echo "my signed document" | npx crypt sign -k k7s0h9nK5oqRd4ip_K8ow2RXZ4p3B5Mp3hguz7G9CMI
+# => jLYPhT1LAckU3WrcXlAPf4eaklfk8qTDyBf1otgqmr7Fx-YATTrZrLrlHYvNyl0EU5SF6URiKJtkyjeRGNe9AA
+
+# Sign a file
+cat document.txt | npx crypt sign -k k7s0h9nK5oqRd4ip_K8ow2RXZ4p3B5Mp3hguz7G9CMI
+
+# Complete workflow: generate keys and sign
+PRIVATE_KEY=$(npx crypt keys | jq -r .privateKey)
+echo "important message" | npx crypt sign -k $PRIVATE_KEY
+```
+
+The signature is output as a base64url-encoded string (Ed25519 signatures are 64 bytes, encoded as 86 characters).
 
 ---
 
