@@ -2,12 +2,11 @@ import { test } from '@substrate-system/tapzero'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import * as u from 'uint8arrays'
-import { didToPublicKey, publicKeyToDid } from '@substrate-system/keys/crypto'
 
 const CLI_PATH = join(process.cwd(), 'dist', 'cli.js')
 
 // Test the `keys` command
-test('keys command generates Ed25519 keypair by default', async t => {
+test('keys command generates Ed25519 keypair by default in raw format', async t => {
     const result = await runCLI(['keys'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
@@ -15,8 +14,28 @@ test('keys command generates Ed25519 keypair by default', async t => {
     const output = JSON.parse(result.stdout.trim())
     t.ok(output.publicKey, 'should have publicKey property')
     t.ok(output.privateKey, 'should have privateKey property')
-    t.ok(output.publicKey.startsWith('z'),
-        'should output base58btc with multibase prefix by default')
+    t.ok(output.publicKey.startsWith('z6Mk'),
+        'public key should be in multikey format (z6Mk prefix for Ed25519)')
+    t.ok(typeof output.privateKey === 'string',
+        'private key should be a base64url string')
+    t.ok(!output.privateKey.includes('{'),
+        'private key should not be a JSON object')
+})
+
+test('keys command generates Ed25519 keypair in JWK format', async t => {
+    const result = await runCLI(['keys', 'ed25519', '-f', 'jwk'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+
+    // Should return just the private key JWK (which contains public key in 'x')
+    t.equal(output.kty, 'OKP', 'should have kty OKP')
+    t.equal(output.crv, 'Ed25519', 'should have crv Ed25519')
+    t.ok(output.x, 'should have x (public key) component')
+    t.ok(output.d, 'should have d (private key) component')
+    t.ok(!output.publicKey, 'should not have separate publicKey field')
+    t.ok(!output.privateKey, 'should not have separate privateKey field')
 })
 
 test('keys command generates RSA keypair with JWK format', async t => {
@@ -25,66 +44,29 @@ test('keys command generates RSA keypair with JWK format', async t => {
     t.equal(result.code, 0, 'command should exit with code 0')
 
     const output = JSON.parse(result.stdout.trim())
-    t.ok(output.publicKey, 'should have publicKey property')
-    t.ok(output.privateKey, 'should have privateKey property')
 
-    // Check that keys are JWK objects
-    t.equal(output.publicKey.kty, 'RSA', 'public key should be RSA JWK')
-    t.equal(output.privateKey.kty, 'RSA', 'private key should be RSA JWK')
-    t.ok(output.privateKey.d, 'private key should have d component')
+    // Should return just the private key JWK
+    t.equal(output.kty, 'RSA', 'should be RSA JWK')
+    t.ok(output.d, 'should have d (private exponent)')
+    t.ok(output.n, 'should have n (modulus)')
+    t.ok(output.e, 'should have e (public exponent)')
+    t.ok(output.p, 'should have p (first prime)')
+    t.ok(output.q, 'should have q (second prime)')
+    t.ok(!output.publicKey, 'should not have separate publicKey field')
+    t.ok(!output.privateKey, 'should not have separate privateKey field')
 })
 
-test('keys command outputs in base58btc format by default', async t => {
-    const result = await runCLI(['keys', 'ed25519'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const pubKey = output.publicKey
-
-    // Base58btc with multibase should start with 'z'
-    t.ok(pubKey && pubKey.startsWith('z'),
-        'should output base58btc with multibase prefix by default')
-})
-
-test('keys command outputs in hex format when specified', async t => {
+test('keys command rejects invalid format', async t => {
     const result = await runCLI(['keys', 'ed25519', '--format', 'hex'])
 
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const pubKey = output.publicKey
-
-    // Hex should only contain 0-9, a-f
-    t.ok(pubKey && /^[0-9a-f]+$/.test(pubKey),
-        'should output valid hexadecimal')
-})
-
-test('keys command outputs in base64 with --format base64', async t => {
-    const result = await runCLI(['keys', 'ed25519', '-f', 'base64'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const pubKey = output.publicKey
-
-    // Base64 should only contain valid base64 characters
-    t.ok(pubKey && /^[A-Za-z0-9+/]+=*$/.test(pubKey),
-        'should output valid base64')
-})
-
-test('keys command outputs in base64pad with --format base64pad', async t => {
-    const result = await runCLI(['keys', 'ed25519', '-f', 'base64pad'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const pubKey = output.publicKey
-
-    // Base64pad should only contain valid base64 characters and end with =
-    t.ok(pubKey && /^[A-Za-z0-9+/]+=*$/.test(pubKey),
-        'should output valid base64pad')
-    t.ok(pubKey.endsWith('='), 'should have padding')
+    t.ok(result.code !== 0, 'should exit with non-zero code for invalid format')
+    t.ok(
+        (
+            result.stderr.includes('Invalid values') ||
+            result.stderr.includes('Choices')
+        ),
+        'should show error about invalid format choice'
+    )
 })
 
 test('keys command shows help with --help flag', async t => {
@@ -97,6 +79,28 @@ test('keys command shows help with --help flag', async t => {
         'should mention algorithm parameter')
     t.ok(result.stdout.includes('format'),
         'should mention format option')
+    t.ok(result.stdout.includes('raw'),
+        'should mention raw format')
+    t.ok(result.stdout.includes('jwk'),
+        'should mention jwk format')
+})
+
+test('Ed25519 raw format has multikey public key and base64url private key', async t => {
+    const result = await runCLI(['keys', 'ed25519'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+
+    // Public key should be multikey format
+    t.ok(output.publicKey.startsWith('z6Mk'),
+        'public key should be multikey format with z6Mk prefix')
+
+    // Private key should be base64url encoded string
+    t.ok(typeof output.privateKey === 'string',
+        'private key should be a string')
+    t.ok(/^[A-Za-z0-9_-]+$/.test(output.privateKey),
+        'private key should be valid base64url (no padding)')
 })
 
 // Test the `encode` command
@@ -265,173 +269,6 @@ test('CLI shows help with --help flag', async t => {
     t.ok(result.stdout.includes('encode'), 'should list encode command')
 })
 
-// Test DID format encoding and decoding
-test('keys command with -f did outputs valid DID format', async t => {
-    const result = await runCLI(['keys', 'ed25519', '-f', 'did'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const did = output.publicKey
-
-    t.ok(did && did.startsWith('did:key:z'),
-        'should output DID format starting with did:key:z')
-})
-
-test('DID string decodes to identical public key for Ed25519', async t => {
-    // Generate a keypair with both base58btc and DID formats
-    const resultBase58 = await runCLI(['keys', 'ed25519', '--format', 'base58btc'])
-    const resultDid = await runCLI(['keys', 'ed25519', '--format', 'did'])
-
-    t.equal(resultBase58.code, 0, 'base58btc command should exit with code 0')
-    t.equal(resultDid.code, 0, 'did command should exit with code 0')
-
-    // Parse outputs
-    const outputDid = JSON.parse(resultDid.stdout.trim())
-    const did = outputDid.publicKey
-
-    // Decode the DID back to public key
-    const decoded = didToPublicKey(did)
-
-    t.ok(decoded.publicKey instanceof Uint8Array,
-        'decoded public key should be Uint8Array')
-    t.equal(decoded.type, 'ed25519',
-        'decoded key type should be ed25519')
-
-    // Verify the DID is well-formed
-    t.ok(did.startsWith('did:key:z'),
-        'DID should start with did:key:z')
-})
-
-test('DID round-trip preserves public key for Ed25519', async t => {
-    // Generate keypair with DID format for public key
-    // Note: Private key is always JWK for Ed25519
-    const resultDid = await runCLI(['keys', 'ed25519', '-f', 'did'])
-    t.equal(resultDid.code, 0, 'did command should exit with code 0')
-
-    const outputDid = JSON.parse(resultDid.stdout.trim())
-    const did = outputDid.publicKey
-
-    // Decode the DID
-    const decoded = didToPublicKey(did)
-
-    // The decoded public key should be the same length as Ed25519 public keys
-    // (32 bytes)
-    t.equal(decoded.publicKey.length, 32,
-        'Ed25519 public key should be 32 bytes')
-    t.equal(decoded.type, 'ed25519',
-        'decoded type should match')
-
-    // Verify private key is JWK
-    t.equal(outputDid.privateKey.kty, 'OKP',
-        'private key should be OKP JWK')
-    t.equal(outputDid.privateKey.crv, 'Ed25519',
-        'private key should have Ed25519 curve')
-})
-
-test('DID format works with -f option', async t => {
-    const result = await runCLI(['keys', 'ed25519', '-f', 'did'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-
-    t.ok(output.publicKey.startsWith('did:key:z'),
-        'public key should be in DID format')
-    t.ok(output.privateKey.kty === 'OKP',
-        'private key should be JWK with kty OKP')
-    t.ok(output.privateKey.d,
-        'private key should have d component')
-})
-
-test('DID decoded public key can be re-encoded to same DID', async t => {
-    // This test imports the encoding function to verify round-trip
-
-    // Generate a keypair with DID format
-    const result = await runCLI(['keys', 'ed25519', '-f', 'did'])
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const originalDid = output.publicKey
-
-    // Decode the DID
-    const decoded = didToPublicKey(originalDid)
-
-    // Re-encode the public key bytes back to DID with the correct key type
-    const reEncodedDid = await publicKeyToDid(decoded.publicKey, 'ed25519')
-
-    // Should get the same DID
-    t.equal(reEncodedDid, originalDid,
-        'Re-encoding decoded public key should produce identical DID')
-})
-
-// Test multikey format
-test('keys command outputs multikey format with -f multi', async t => {
-    const result = await runCLI(['keys', 'ed25519', '-f', 'multi'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-    const multikey = output.publicKey
-
-    t.ok(multikey.startsWith('z6Mk'),
-        'Ed25519 multikey should start with z6Mk (multicodec 0xed01 + base58btc)')
-})
-
-test('multikey format is DID without the did:key: prefix', async t => {
-    // Generate both DID and multikey formats
-    const resultDid = await runCLI(['keys', 'ed25519', '-f', 'did'])
-    const resultMultikey = await runCLI(['keys', 'ed25519', '-f', 'multi'])
-
-    t.equal(resultDid.code, 0, 'DID command should exit with code 0')
-    t.equal(resultMultikey.code, 0, 'multikey command should exit with code 0')
-
-    // Parse outputs - note: these are different keys since we generated twice
-    // But we can verify the structure
-    const outputDid = JSON.parse(resultDid.stdout.trim())
-    const outputMultikey = JSON.parse(resultMultikey.stdout.trim())
-
-    const did = outputDid.publicKey
-    const multikey = outputMultikey.publicKey
-
-    // DID should have the prefix
-    t.ok(did.startsWith('did:key:'),
-        'DID should start with did:key:')
-
-    // Multikey should not have the prefix
-    t.ok(!multikey.startsWith('did:key:'),
-        'Multikey should not have did:key: prefix')
-    t.ok(multikey.startsWith('z6Mk'),
-        'Multikey should start with z6Mk')
-})
-
-test('multikey format works with --format multi', async t => {
-    const result = await runCLI(['keys', 'ed25519', '--format', 'multi'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-
-    t.ok(output.publicKey.startsWith('z6Mk'),
-        'public key should be in multikey format')
-    t.ok(output.privateKey.kty === 'OKP',
-        'private key should be JWK')
-})
-
-test('RSA multikey has different prefix than Ed25519', async t => {
-    const result = await runCLI(['keys', 'rsa', '-f', 'jwk'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-
-    // For RSA with JWK format, both keys should be JWK objects
-    t.equal(output.publicKey.kty, 'RSA',
-        'RSA public key should be JWK with kty RSA')
-    t.equal(output.privateKey.kty, 'RSA',
-        'RSA private key should be JWK with kty RSA')
-})
-
 // Test multibase input format
 test('encode command handles multibase input with -i multi', async t => {
     // First create a multibase-encoded string
@@ -485,8 +322,8 @@ test('encode command handles hex multibase input', async t => {
 })
 
 test('encode command handles multikey format input', async t => {
-    // Generate a multikey
-    const keyResult = await runCLI(['keys', 'ed25519', '-f', 'multi'])
+    // Generate a multikey using raw format (which outputs multikey for public key)
+    const keyResult = await runCLI(['keys', 'ed25519'])
     t.equal(keyResult.code, 0, 'keys command should exit with code 0')
 
     const keyOutput = JSON.parse(keyResult.stdout.trim())
@@ -570,65 +407,36 @@ test('encode round-trip: multi -> hex -> multi preserves multikey', async t => {
         'round-trip conversion should preserve the original multikey')
 })
 
-// Test JWK format
-test('Ed25519 keys with -f jwk outputs both keys as JWK', async t => {
+test('Ed25519 JWK has both public and private key components', async t => {
     const result = await runCLI(['keys', 'ed25519', '-f', 'jwk'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
 
-    const output = JSON.parse(result.stdout.trim())
+    const jwk = JSON.parse(result.stdout.trim())
 
-    // Check public key is JWK
-    t.equal(output.publicKey.kty, 'OKP', 'public key should have kty OKP')
-    t.equal(output.publicKey.crv, 'Ed25519', 'public key should have crv Ed25519')
-    t.ok(output.publicKey.x, 'public key should have x component')
-    t.ok(!output.publicKey.d, 'public key should not have d component')
+    t.equal(jwk.kty, 'OKP', 'should have kty OKP')
+    t.equal(jwk.crv, 'Ed25519', 'should have crv Ed25519')
+    t.ok(jwk.x, 'should have x (public key) component')
+    t.ok(jwk.d, 'should have d (private key) component')
 
-    // Check private key is JWK
-    t.equal(output.privateKey.kty, 'OKP', 'private key should have kty OKP')
-    t.equal(output.privateKey.crv,
-        'Ed25519', 'private key should have crv Ed25519')
-    t.ok(output.privateKey.x, 'private key should have x component')
-    t.ok(output.privateKey.d, 'private key should have d component')
+    // Verify the components are base64url encoded
+    t.ok(/^[A-Za-z0-9_-]+$/.test(jwk.x), 'x should be base64url encoded')
+    t.ok(/^[A-Za-z0-9_-]+$/.test(jwk.d), 'd should be base64url encoded')
 })
 
-test('Ed25519 private key is always JWK regardless of public key', async t => {
-    const result = await runCLI(['keys', 'ed25519', '-f', 'hex'])
-
-    t.equal(result.code, 0, 'command should exit with code 0')
-
-    const output = JSON.parse(result.stdout.trim())
-
-    // Public key should be hex
-    t.ok(/^[0-9a-f]+$/.test(output.publicKey), 'public key should be hex')
-
-    // Private key should still be JWK
-    t.equal(output.privateKey.kty, 'OKP', 'private key should be JWK with kty OKP')
-    t.equal(output.privateKey.crv,
-        'Ed25519', 'private key should have Ed25519 curve')
-    t.ok(output.privateKey.d, 'private key should have d component')
-})
-
-test('RSA keys with -f jwk outputs both keys as JWK', async t => {
+test('RSA JWK contains all required components', async t => {
     const result = await runCLI(['keys', 'rsa', '-f', 'jwk'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
 
-    const output = JSON.parse(result.stdout.trim())
+    const jwk = JSON.parse(result.stdout.trim())
 
-    // Check public key is RSA JWK
-    t.equal(output.publicKey.kty, 'RSA', 'public key should have kty RSA')
-    t.ok(output.publicKey.n, 'public key should have n (modulus)')
-    t.ok(output.publicKey.e, 'public key should have e (exponent)')
-    t.ok(!output.publicKey.d, 'public key should not have d (private exponent)')
-
-    // Check private key is RSA JWK
-    t.equal(output.privateKey.kty, 'RSA', 'private key should have kty RSA')
-    t.ok(output.privateKey.n, 'private key should have n (modulus)')
-    t.ok(output.privateKey.e, 'private key should have e (exponent)')
-    t.ok(output.privateKey.d, 'private key should have d (private exponent)')
-    t.ok(output.privateKey.p, 'private key should have p (first prime)')
-    t.ok(output.privateKey.q, 'private key should have q (second prime)')
+    t.equal(jwk.kty, 'RSA', 'should have kty RSA')
+    t.ok(jwk.n, 'should have n (modulus)')
+    t.ok(jwk.e, 'should have e (public exponent)')
+    t.ok(jwk.d, 'should have d (private exponent)')
+    t.ok(jwk.p, 'should have p (first prime)')
+    t.ok(jwk.q, 'should have q (second prime)')
 })
 
 /**

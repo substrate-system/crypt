@@ -119,11 +119,10 @@ await yargs(hideBin(process.argv))
                 })
                 .option('format', {
                     alias: 'f',
-                    describe: 'Output format for the public key',
+                    describe: 'Output format',
                     type: 'string',
-                    choices: ['base64', 'base64pad', 'hex', 'base64url',
-                        'base58btc', 'did', 'multi', 'jwk'],
-                    default: 'multi'
+                    choices: ['raw', 'jwk'],
+                    default: 'raw'
                 })
                 .option('output', {
                     alias: 'o',
@@ -140,7 +139,7 @@ await yargs(hideBin(process.argv))
         async (argv) => {
             await keysCommand({
                 algorithm: argv.algorithm as 'ed25519'|'rsa',
-                format: argv.format as u.SupportedEncodings|'did'|'multi',
+                format: argv.format as 'raw'|'jwk',
                 output: argv.output as string|undefined,
                 useMultibase: argv.multi as boolean
             })
@@ -231,22 +230,29 @@ await yargs(hideBin(process.argv))
 
 /**
  * Generate a new keypair.
- * For Ed25519: Private keys are exported in JWK format to stdout, or to a file if -o is specified.
+ * For Ed25519: By default (format 'raw'), private keys are exported as base64url-encoded seeds,
+ *              public keys as multikey format. Can use -f jwk for JWK format, or -o to save to file.
  * For RSA: Private keys are exported as PKCS#8 PEM to a file (requires -o option),
  *          or as JWK to stdout if format is 'jwk'.
  */
 async function keysCommand (args:{
     algorithm:'ed25519'|'rsa',
-    format?:u.SupportedEncodings|'did'|'multi'|'jwk',
+    format?:'raw'|'jwk',
     output?:string,
    useMultibase?:boolean
-} = { algorithm: 'ed25519', format: 'multi' }) {
-    const publicFormat = args.format || 'multi'
+} = { algorithm: 'ed25519', format: 'raw' }) {
+    const publicFormat = args.format || 'raw'
     const useMultibase = args.useMultibase || false
 
     // For RSA, require output file unless format is 'jwk'
     if (args.algorithm === 'rsa' && publicFormat !== 'jwk' && !args.output) {
         console.error(chalk.red('Error: RSA keys require an output file. Use -o or --output to specify the private key file, or use -f jwk for JWK output.'))
+        process.exit(1)
+    }
+
+    // 'raw' format only supported for Ed25519
+    if (args.algorithm === 'rsa' && publicFormat === 'raw') {
+        console.error(chalk.red('Error: "raw" format is only supported for Ed25519 keys. Use -f jwk for RSA keys.'))
         process.exit(1)
     }
 
@@ -261,14 +267,22 @@ async function keysCommand (args:{
                 ['sign', 'verify']
             )
 
-            const privateKey = await webcrypto.subtle.exportKey(
-                'jwk',
-                keypair.privateKey
-            )
-
             if (args.output) {
                 // Write private key to file
-                writeFileSync(args.output, JSON.stringify(privateKey, null, 2), 'utf8')
+                const privateKeyJwk = await webcrypto.subtle.exportKey(
+                    'jwk',
+                    keypair.privateKey
+                )
+
+                if (publicFormat === 'jwk') {
+                    writeFileSync(args.output, JSON.stringify(privateKeyJwk, null, 2), 'utf8')
+                } else {
+                    // Export the seed from JWK 'd' field (already base64url encoded)
+                    if (!privateKeyJwk.d) {
+                        throw new Error('Private key JWK missing "d" field')
+                    }
+                    writeFileSync(args.output, privateKeyJwk.d, 'utf8')
+                }
 
                 // Output only public key to stdout
                 if (publicFormat === 'jwk') {
@@ -278,49 +292,55 @@ async function keysCommand (args:{
                     )
                     console.log(JSON.stringify({ publicKey }))
                 } else {
+                    // For 'raw' format, use multikey for public key
                     const publicKey = await webcrypto.subtle.exportKey(
                         'raw',
                         keypair.publicKey
                     )
+                    const publicKeyFormatted = await formatOutput(
+                        new Uint8Array(publicKey),
+                        'multi',
+                        useMultibase,
+                        'ed25519',
+                        true
+                    )
                     console.log(JSON.stringify({
-                        publicKey: await formatOutput(
-                            new Uint8Array(publicKey),
-                            publicFormat,
-                            useMultibase,
-                            'ed25519',
-                            true
-                        )
+                        publicKey: publicKeyFormatted
                     }))
                 }
             } else {
                 // Output both keys to stdout
-                if (publicFormat === 'jwk') {
-                    // Export public key as JWK
-                    const publicKey = await webcrypto.subtle.exportKey(
-                        'jwk',
-                        keypair.publicKey
-                    )
+                const privateKeyJwk = await webcrypto.subtle.exportKey(
+                    'jwk',
+                    keypair.privateKey
+                )
 
-                    console.log(JSON.stringify({
-                        publicKey,
-                        privateKey
-                    }))
+                if (publicFormat === 'jwk') {
+                    // Export only private key JWK (which contains public key in 'x' field)
+                    console.log(JSON.stringify(privateKeyJwk))
                 } else {
-                    // Export public key as raw bytes
+                    // For 'raw' format, use multikey for public key
                     const publicKey = await webcrypto.subtle.exportKey(
                         'raw',
                         keypair.publicKey
                     )
+                    const publicKeyFormatted = await formatOutput(
+                        new Uint8Array(publicKey),
+                        'multi',
+                        useMultibase,
+                        'ed25519',
+                        true
+                    )
+
+                    // Extract seed from JWK 'd' field (already base64url encoded)
+                    if (!privateKeyJwk.d) {
+                        throw new Error('Private key JWK missing "d" field')
+                    }
+                    const privateKeyEncoded = privateKeyJwk.d
 
                     console.log(JSON.stringify({
-                        publicKey: await formatOutput(
-                            new Uint8Array(publicKey),
-                            publicFormat,
-                            useMultibase,
-                            'ed25519',
-                            true
-                        ),
-                        privateKey
+                        publicKey: publicKeyFormatted,
+                        privateKey: privateKeyEncoded
                     }))
                 }
             }
@@ -337,28 +357,19 @@ async function keysCommand (args:{
             )
 
             if (publicFormat === 'jwk') {
-                // Export as JWK to stdout
-                const publicKey = await webcrypto.subtle.exportKey(
-                    'jwk',
-                    keypair.publicKey
-                )
+                // Export as JWK to stdout (private key JWK contains public key in 'x' field)
                 const privateKey = await webcrypto.subtle.exportKey(
                     'jwk',
                     keypair.privateKey
                 )
 
-                console.log(JSON.stringify({
-                    publicKey,
-                    privateKey
-                }))
+                console.log(JSON.stringify(privateKey))
             } else {
-                // Export public key as SPKI
+                // For 'raw' format, export as PKCS#8 PEM
                 const publicKey = await webcrypto.subtle.exportKey(
                     'spki',
                     keypair.publicKey
                 )
-
-                // Export as PKCS#8 PEM to file
                 const privateKey = await webcrypto.subtle.exportKey(
                     'pkcs8',
                     keypair.privateKey
@@ -368,11 +379,11 @@ async function keysCommand (args:{
                 const pem = pkcs8ToPem(new Uint8Array(privateKey))
                 writeFileSync(args.output!, pem, 'utf8')
 
-                // Output public key to stdout
+                // Output public key to stdout in multikey format
                 console.log(JSON.stringify({
                     publicKey: await formatOutput(
                         new Uint8Array(publicKey),
-                        publicFormat,
+                        'multi',
                         useMultibase,
                         'rsa',
                         true
@@ -514,14 +525,20 @@ async function decodeCommand (
 
 /**
  * Format output with multibase prefix for base58btc, DID, or multi format.
+ * Note: 'raw' format should be handled before calling this function (converted to 'multi' for public keys).
  */
 async function formatOutput (
     bytes:Uint8Array,
-    format:u.SupportedEncodings|'did'|'multi',
+    format:u.SupportedEncodings|'did'|'multi'|'raw',
     useMultibase = false,
     keyType?:'ed25519'|'rsa',
     isPublicKey = false
 ):Promise<string> {
+    // 'raw' format for public keys should use multikey format
+    if (format === 'raw') {
+        format = 'multi'
+    }
+
     if (format === 'did') {
         // For DID format, we need raw key bytes
         let keyBytes = bytes

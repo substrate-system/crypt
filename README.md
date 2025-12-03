@@ -25,6 +25,7 @@ This exposes a command `crypt`.
   * [`decode [input-format]`](#decode-input-format)
 - [Key Format](#key-format)
   * [Multikey](#multikey)
+  * [Private keys](#private-keys)
 
 <!-- tocstop -->
 
@@ -48,11 +49,13 @@ npx crypt keys
 ### Generate and Encode Keys
 
 For **Ed25519** keys, this will print a JSON string with
-`{ publicKey, privateKey }` to `stdout`.
-For **RSA** keys, the private key is written to a file (requires `-o` option)
-and the public key is printed to `stdout`.
+`{ publicKey, privateKey }` to `stdout`. By default (format `raw`):
+- `publicKey` is in multikey format
+- `privateKey` is the base64url-encoded seed
 
-The default output format is `multi` (multikey format).
+For **RSA** keys, the private key is written to a file (requires `-o` option)
+and the public key is printed to `stdout` in multikey format.
+
 You can pass in a different encoding to use for the output with
 the `-f` or `--format` option.
 
@@ -101,8 +104,10 @@ npx crypt encode --help
 Generate a new cryptographic keypair, by default `ed25519`.
 
 **Ed25519 keys**: Output is a JSON string of `{ publicKey, privateKey }`
-to stdout. Private keys are in JWK format. If `-o` is specified, the
-private key is written to the file and only the public key is printed to stdout.
+to stdout. By default (`-f raw`), the public key is in multikey format and
+the private key is a base64url-encoded seed. Use `-f jwk` for JWK format.
+If `-o` is specified, the private key is written to the file and only the
+public key is printed to stdout.
 
 **RSA keys**: Requires `-o` option to specify output file for the private key
 (in PKCS#8 PEM format), unless using `-f jwk` which outputs both keys as
@@ -116,22 +121,19 @@ JSON to stdout.
 
 #### Options
 
-* `-f, --format` - Output format for public key (default: `multi`)
-  - `multi` - Multikey format with multibase encoding
-  - `base58btc` - Base58 with multibase prefix (`z`)
-  - `base64` - Standard base64 encoding
-  - `base64pad` - Padded base64 encoding
-  - `hex` - Hexadecimal encoding
-  - `base64url` - URL-safe base64 encoding
-  - `did` - Decentralized identifier format (`did:key:z...`)
-  - `jwk` - JSON Web Key format (outputs both public and private keys)
+* `-f, --format` - Output format (default: `raw`)
+  - `raw` - **(default)** For Ed25519: public key in multikey format,
+    private key as base64url-encoded seed. For RSA: requires `-o` option.
+  - `jwk` - JSON Web Key format (outputs private key JWK,
+    which includes public key in `x` field for Ed25519)
 
 * `-o, --output` - Output file for private key
   - **Required for RSA** (unless using `-f jwk`)
   - Optional for Ed25519
     (if specified, private key goes to file instead of stdout)
   - RSA private keys are written as PKCS#8 PEM format
-  - Ed25519 private keys are written as JWK format
+  - Ed25519 private keys are written as base64url-encoded seed (default)
+    or JWK format (if using `-f jwk`)
 
 * `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
   - When enabled, adds the appropriate
@@ -143,37 +145,30 @@ JSON to stdout.
 #### `keys` Example
 
 ```sh
-# Generate Ed25519 keypair in multikey format (default)
+# Generate Ed25519 keypair (default: raw format)
 npx crypt keys
-# => {"publicKey":"z6Mk...", "privateKey":{...JWK...}}
+# => {"publicKey":"z6Mk...", "privateKey":"mZ5t7zw8D..."}
+# (publicKey is multikey format, privateKey is base64url-encoded seed)
 
-# Generate Ed25519 keypair in base58btc
-npx crypt keys -f base58btc
-
-# Generate Ed25519 keypair in DID format
-npx crypt keys -f did
-# => {"publicKey":"did:key:z6Mk...", "privateKey":{...JWK...}}
+# Generate Ed25519 keypair in JWK format
+npx crypt keys -f jwk
+# => {"key_ops":["sign"],"ext":true,"crv":"Ed25519","d":"...","x":"...","kty":"OKP","alg":"Ed25519"}
+# (Returns private key JWK; public key is in the 'x' field)
 
 # Generate Ed25519 keypair, save private key to file
-npx crypt keys -o private.json
+npx crypt keys -o private.txt
 # => {"publicKey":"z6Mk..."}
-# (private.json contains the JWK)
+# (private.txt contains the base64url-encoded seed)
 
 # Generate RSA keypair, save private key to file as PEM
 npx crypt keys rsa -o private.pem
 # => {"publicKey":"z5Tc..."}
 # (private.pem contains PKCS#8 PEM format)
 
-# Generate RSA keypair in JWK format (both keys to stdout)
+# Generate RSA keypair in JWK format
 npx crypt keys rsa -f jwk
-# => {"publicKey":{...JWK...}, "privateKey":{...JWK...}}
-
-# Generate keypair with multibase encoding (adds prefixes)
-npx crypt keys --format hex --multi
-# => {"publicKey":"f8291f2...", "privateKey":{...JWK...}}
-
-npx crypt keys --format base64 -m
-# => {"publicKey":"mCKHyYn...", "privateKey":{...JWK...}}
+# => {...JWK with private key...}
+# (Returns private key JWK; public key components are included)
 ```
 
 ---
@@ -212,8 +207,8 @@ echo "SGVsbG8gV29ybGQ=" | npx crypt encode hex -i base64
 # Convert hex to base58btc
 echo "48656c6c6f" | npx crypt encode base58btc -i hex
 
-# Pipe between commands
-npx crypt keys | jq -r .publicKey | npx crypt encode hex -i base58btc
+# Pipe between commands (publicKey is in multikey format)
+npx crypt keys | jq -r .publicKey | npx crypt encode hex -i multi
 
 # Encode with multibase prefixes
 echo "Hello World" | npx crypt encode base64 --multi
@@ -320,3 +315,8 @@ function decodeMultikey (multibaseStr):{ } {
   return { multicodec: code, rawKey }
 }
 ```
+
+### Private keys
+
+Private keys are either a "raw" 32 byte string, or JWK encoded, or PEM format
+for RSA.
