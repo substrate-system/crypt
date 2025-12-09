@@ -12,7 +12,8 @@
     "crypt": "dist/cli.js"
   },
   "exports": {
-    ".": "./dist/cli.js",
+    ".": "./dist/index.js",
+    "./cli": "./dist/cli.js",
     "./*": "./dist/*.js"
   },
   "scripts": {

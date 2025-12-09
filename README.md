@@ -8,8 +8,7 @@
 [![install size](https://flat.badgen.net/packagephobia/install/@substrate-system/crypt)](https://packagephobia.com/result?p=@substrate-system/crypt)
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
-A CLI tool for creating keys and encoding strings.
-This exposes a command `crypt`.
+A CLI tool and JavaScript library for creating cryptographic keys and encoding strings. Provides both a command-line interface (`crypt`) and a programmatic API.
 
 
 <details><summary><h2>Contents</h2></summary>
@@ -24,6 +23,13 @@ This exposes a command `crypt`.
   * [`sign [message]`](#sign-message)
   * [`encode [output-format]`](#encode-output-format)
   * [`decode [input-format]`](#decode-input-format)
+- [JavaScript API](#javascript-api)
+  * [Installation](#installation)
+  * [Importing](#importing)
+  * [`keys(options)`](#keysoptions)
+  * [`sign(message, options)`](#signmessage-options)
+  * [`encode(input, options)`](#encodeinput-options)
+  * [`decode(input, options)`](#decodeinput-options)
 - [Key Format](#key-format)
   * [Multikey](#multikey)
   * [Private keys](#private-keys)
@@ -54,7 +60,7 @@ For **Ed25519** keys, this will print a JSON string with
 - `publicKey` is in multikey format
 - `privateKey` is the base64url-encoded seed
 
-For **X25519** keys (used for key exchange/ECDH), output is similar to Ed25519:
+For **X25519** keys (used for key exchange/ECDH), output is the same as Ed25519:
 - `publicKey` is base64url-encoded
 - `privateKey` is the base64url-encoded seed
 
@@ -151,13 +157,6 @@ JSON to stdout.
   - RSA private keys are written as PKCS#8 PEM format
   - Ed25519 and X25519 private keys are written as base64url-encoded seed (default)
     or JWK format (if using `-f jwk`)
-
-* `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
-  - When enabled, adds the appropriate
-    [multibase](https://github.com/multiformats/multibase) prefix for the
-    encoding format
-  - Prefixes: `m` (base64), `M` (base64pad), `u` (base64url),
-    `U` (base64urlpad), `z` (base58btc), `f` (hex)
 
 #### `keys` Example
 
@@ -257,11 +256,6 @@ Convert a string from one encoding format to another. Reads input from stdin.
 * `-i, --input-format` - The format of the input string (default: `utf8`)
   - `base64`, `hex`, `base64url`, `base58btc`, `utf8`, `ascii`
 
-* `-m, --multi` - Use multibase encoding with prefixes (default: `false`)
-  - Add the appropriate [multibase](https://github.com/multiformats/multibase)
-    prefix to the output.
-  - Prefixes: `m` (base64), `u` (base64url), `z` (base58btc), `f` (hex)
-
 #### `encode` Example
 
 ```sh
@@ -279,16 +273,6 @@ echo "48656c6c6f" | npx crypt encode base58btc -i hex
 
 # Pipe between commands (publicKey is in multikey format)
 npx crypt keys | jq -r .publicKey | npx crypt encode hex -i multi
-
-# Encode with multibase prefixes
-echo "Hello World" | npx crypt encode base64 --multi
-# => mSGVsbG8gV29ybGQ
-
-echo "Hello World" | npx crypt encode hex -m
-# => f48656c6c6f20576f726c64
-
-echo "Hello World" | npx crypt encode base64url --multi
-# => uSGVsbG8gV29ybGQ
 
 # convert "multikey" format to hex format
 echo "z6MkiLr..." | npx crypt encode hex -i multi
@@ -321,6 +305,197 @@ echo "48656c6c6f20576f726c64" | npx crypt decode hex
 # Decode base58btc to UTF-8
 echo "JxF12TrwUP45BMd" | npx crypt decode base58btc
 ```
+
+---
+
+## JS API
+
+This package exposes a JavaScript API too.
+
+### Installation
+
+```sh
+npm i -S @substrate-system/crypt
+```
+
+### Importing
+
+```js
+// Import specific functions
+import { keys, sign, encode, decode } from '@substrate-system/crypt'
+
+// Or import everything
+import * as crypt from '@substrate-system/crypt'
+```
+
+### `keys(options)`
+
+Generate a new cryptographic keypair.
+
+```ts
+async function keys (args:{
+    algorithm?:'ed25519'|'x25519'|'rsa',
+    format?:'raw'|'jwk',
+    useMultibase?:boolean
+} = {}):Promise<{
+    publicKey:string|object,
+    privateKey?:string|object,
+    privateKeyPem?:string
+}>
+```
+
+#### Parameters
+
+- `options` (object, optional):
+  * `algorithm` (`ed25519`, `rsa` or `x25519`; default: `ed25519`)
+  * `format` (`'raw' | 'jwk'`, default: `'raw'`) - Output format
+  * `useMultibase` (boolean, default: `false`) - Add multibase prefix
+    (currently not functional for multikey format)
+
+#### Return value
+
+- For `raw` format Ed25519/X25519: `{ publicKey: string, privateKey: string }`
+- For `raw` format RSA: `{ publicKey: string, privateKeyPem: string }`
+- For `jwk` format: Returns the JWK object directly
+
+**Example:**
+
+```js
+import { keys } from '@substrate-system/crypt'
+
+// Generate Ed25519 keypair (default)
+const keypair = await keys()
+console.log(keypair.publicKey)  // z6Mk... (multikey format)
+console.log(keypair.privateKey)  // base64url-encoded seed
+
+// Generate X25519 keypair
+const x25519Keys = await keys({ algorithm: 'x25519' })
+
+// Generate RSA keypair in JWK format
+const rsaJwk = await keys({ algorithm: 'rsa', format: 'jwk' })
+```
+
+### `sign(message, options)`
+
+```ts
+async function sign (
+    message:string,
+    options:{ key:string }
+):Promise<string>
+```
+
+Sign a message with a private key. Supports both Ed25519 and RSA keys.
+
+#### Parameters
+- `message` (string) - The message to sign
+- `options` (object):
+  * `key` (string, required) - Private key in one of these formats:
+    - **Ed25519**: base64url-encoded seed
+    - **RSA**: PEM-encoded private key (PKCS#8 format)
+
+#### Returns
+
+Base64url-encoded signature.
+
+#### Example
+
+```js
+import { keys, sign } from '@substrate-system/crypt'
+
+// Sign with Ed25519 key
+const ed25519Keypair = await keys()
+const ed25519Sig = await sign('Hello World', { key: ed25519Keypair.privateKey })
+console.log(ed25519Sig)  // Base64url-encoded signature
+
+// Sign with RSA key
+const rsaKeypair = await keys({ algorithm: 'rsa' })
+const rsaSig = await sign('Hello World', { key: rsaKeypair.privateKeyPem })
+console.log(rsaSig)  // Base64url-encoded signature
+```
+
+### `encode(input, options)`
+
+Convert a string from one encoding format to another.
+
+```ts
+async function encode (
+    input:string,
+    options:{
+        inputFormat?:u.SupportedEncodings|'multi',
+        outputFormat:u.SupportedEncodings|'multi',
+        useMultibase?:boolean,
+        keyType?:'ed25519'|'rsa'
+    }
+):Promise<string>
+```
+
+#### Parameters
+- `input` (string) - The input string to encode
+- `options` (object):
+  * `inputFormat` (`u.SupportedEncodings|'multi'`, default: `'utf8'`)
+  * `outputFormat` (`u.SupportedEncodings|'multi'`, required) - Output format
+  * `useMultibase` (boolean, default: `false`) - Add multibase prefix
+  * `keyType` (`'ed25519'|'rsa'`, optional) - Required if output is `'multi'`
+
+Supported encodings: `'base64'`, `'hex'`, `'base64url'`, `'base58btc'`,
+`'utf8'`, `'ascii'`, `'multi'`
+
+#### Returns
+
+The encoded string
+
+#### Example
+
+```js
+import { encode } from '@substrate-system/crypt'
+
+// Encode UTF-8 to base64
+const encoded = await encode('Hello World', {
+  inputFormat: 'utf8',
+  outputFormat: 'base64'
+})
+
+// Convert hex to multikey format
+const multikey = await encode('1234...', {
+  inputFormat: 'hex',
+  outputFormat: 'multi',
+  keyType: 'ed25519'
+})
+```
+
+### `decode(input, options)`
+
+Decode a string from a given format to UTF-8.
+
+```ts
+async function decode (
+  input:string,
+  options:{ inputFormat:u.SupportedEncodings }
+):Promise<string>
+```
+
+#### Parameters
+
+- `input` (string) - The input string to decode
+- `options` (object):
+  * `inputFormat` (`u.SupportedEncodings`, required) - Input format
+
+#### Returns
+
+The decoded UTF-8 string
+
+#### Example
+
+```js
+import { decode } from '@substrate-system/crypt'
+
+const decoded = await decode('SGVsbG8gV29ybGQ=', {
+  inputFormat: 'base64'
+})
+console.log(decoded) // 'Hello World'
+```
+
+---
 
 ## Key Format
 

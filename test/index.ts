@@ -2,7 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import * as u from 'uint8arrays'
-import { keys, sign, encode, decode } from '../src/cli.js'
+import { sign, encode, decode, keys } from '../src/index.js'
 
 const CLI_PATH = join(process.cwd(), 'dist', 'cli.js')
 
@@ -304,19 +304,12 @@ test('CLI shows help with --help flag', async t => {
 
 // Test multibase input format
 test('encode command handles multibase input with -i multi', async t => {
-    // First create a multibase-encoded string
+    // Create a multibase-encoded string manually (base64 with 'm' prefix)
     const input = 'Hello World'
-    const resultMulti = await runCLIWithStdin(
-        ['encode', 'base64', '--multi'],
-        input
-    )
+    const base64 = u.toString(u.fromString(input, 'utf8'), 'base64')
+    const multibaseString = 'm' + base64
 
-    t.equal(resultMulti.code, 0, 'multibase encode should exit with code 0')
-
-    const multibaseString = resultMulti.stdout.trim()
-    t.ok(multibaseString.startsWith('m'), 'should have base64 multibase prefix')
-
-    // Now decode it using -i multi
+    // Decode it using -i multi
     const resultDecode = await runCLIWithStdin(
         ['encode', 'hex', '-i', 'multi'],
         multibaseString
@@ -649,6 +642,20 @@ test('JS API: sign() produces consistent signatures', async t => {
         const sig2 = await sign(message, { key: keypair.privateKey })
 
         t.equal(sig1, sig2, 'signatures should be identical for same message and key')
+    }
+})
+
+test('JS API: sign() signs with RSA keys', async t => {
+    const keypair = await keys({ algorithm: 'rsa' })
+    if (typeof keypair.privateKeyPem === 'string') {
+        const message = 'test message for RSA'
+        const signature = await sign(message, { key: keypair.privateKeyPem })
+
+        t.ok(signature, 'should return a signature')
+        t.ok(typeof signature === 'string', 'signature should be a string')
+        t.ok(/^[A-Za-z0-9_-]+$/.test(signature), 'signature should be base64url encoded')
+        // RSA-PSS signatures are 256 bytes (2048-bit key), base64url encoded
+        t.ok(signature.length > 300, 'RSA signature should be longer than Ed25519')
     }
 })
 
