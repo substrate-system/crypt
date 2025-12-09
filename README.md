@@ -23,7 +23,7 @@ A CLI tool and JavaScript library for creating cryptographic keys and encoding s
   * [`sign [message]`](#sign-message)
   * [`encode [output-format]`](#encode-output-format)
   * [`decode [input-format]`](#decode-input-format)
-- [JavaScript API](#javascript-api)
+- [JS API](#js-api)
   * [Installation](#installation)
   * [Importing](#importing)
   * [`keys(options)`](#keysoptions)
