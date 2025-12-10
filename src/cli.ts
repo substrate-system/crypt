@@ -11,12 +11,12 @@ import { keys, encode, decode, sign } from './index.js'
 if (import.meta.url === `file://${process.argv[1]}`) {
     await yargs(hideBin(process.argv))
         .command(
-            'keys [algorithm]',
+            'keys [type]',
             'Create a new keypair',
             (yargs) => {
                 return yargs
-                    .positional('algorithm', {
-                        describe: 'The algorithm to use for the new key',
+                    .positional('type', {
+                        describe: 'The key type to use for the new key',
                         type: 'string',
                         choices: ['ed25519', 'x25519', 'rsa'],
                         default: 'ed25519'
@@ -35,12 +35,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
                             'optional for Ed25519/X25519)',
                         type: 'string'
                     })
+                    .option('use', {
+                        alias: 'u',
+                        describe: 'Key usage for RSA keys (sign or exchange)',
+                        type: 'string',
+                        choices: ['sign', 'exchange'],
+                        default: 'sign'
+                    })
             },
             async (argv) => {
                 await keysCommand({
-                    algorithm: argv.algorithm as 'ed25519'|'x25519'|'rsa',
+                    keyType: argv.type as 'ed25519'|'x25519'|'rsa',
                     format: argv.format as 'raw'|'jwk',
-                    output: argv.output as string|undefined
+                    output: argv.output as string|undefined,
+                    use: argv.use as 'sign'|'exchange'
                 })
             }
         )
@@ -79,7 +87,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
                     })
             },
             async (argv) => {
-            // Read from stdin
+                // Read from stdin
                 const input = (await readStdin()).trim()
 
                 const result = await encodeCommand(
@@ -121,7 +129,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
             (yargs) => {
                 return yargs
                     .positional('message', {
-                        describe: 'The message to sign (or read from stdin if omitted)',
+                        describe: 'The message to sign (or read ' +
+                            'from stdin if omitted)',
                         type: 'string'
                     })
                     .option('key', {
@@ -132,7 +141,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
                     })
             },
             async (argv) => {
-            // If message is not provided as argument, read from stdin
+                // If message is not provided as argument, read from stdin
                 let message:string
                 if (argv.message) {
                     message = argv.message
@@ -157,14 +166,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
  * CLI command handler for keys command.
  */
 async function keysCommand (args:{
-    algorithm:'ed25519'|'x25519'|'rsa',
+    keyType:'ed25519'|'x25519'|'rsa',
     format?:'raw'|'jwk',
-    output?:string
-} = { algorithm: 'ed25519', format: 'raw' }) {
+    output?:string,
+    use?:'sign'|'exchange'
+} = { keyType: 'ed25519', format: 'raw' }) {
     const publicFormat = args.format || 'raw'
 
     // For RSA, require output file unless format is 'jwk'
-    if (args.algorithm === 'rsa' && publicFormat !== 'jwk' && !args.output) {
+    if (args.keyType === 'rsa' && publicFormat !== 'jwk' && !args.output) {
         console.error(chalk.red('Error: RSA keys require an output file. Use -o or --output to specify the private key file, or use -f jwk for JWK output.'))
         process.exit(1)
     }

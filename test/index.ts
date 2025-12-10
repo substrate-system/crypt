@@ -7,7 +7,7 @@ import { sign, encode, decode, keys } from '../src/index.js'
 const CLI_PATH = join(process.cwd(), 'dist', 'cli.js')
 
 // Test the `keys` command
-test('keys command generates Ed25519 keypair by default in raw format', async t => {
+test('`keys` generates Ed25519 keypair by default in raw format', async t => {
     const result = await runCLI(['keys'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
@@ -57,7 +57,21 @@ test('keys command generates RSA keypair with JWK format', async t => {
     t.ok(!output.privateKey, 'should not have separate privateKey field')
 })
 
-test('keys command generates X25519 keypair by default in raw format', async t => {
+test('keys command generates RSA encryption keypair with --use exchange', async t => {
+    const result = await runCLI(['keys', 'rsa', '-f', 'jwk', '-u', 'exchange'])
+
+    t.equal(result.code, 0, 'command should exit with code 0')
+
+    const output = JSON.parse(result.stdout.trim())
+
+    // Should return RSA JWK for encryption
+    t.equal(output.kty, 'RSA', 'should be RSA JWK')
+    t.ok(output.d, 'should have d (private exponent)')
+    t.ok(output.n, 'should have n (modulus)')
+    t.ok(output.e, 'should have e (public exponent)')
+})
+
+test('`keys` generates X25519 keypair by default in raw format', async t => {
     const result = await runCLI(['keys', 'x25519'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
@@ -108,8 +122,8 @@ test('keys command shows help with --help flag', async t => {
     t.equal(result.code, 0, 'help command should exit with code 0')
     t.ok(result.stdout.includes('Create a new keypair'),
         'should show command description')
-    t.ok(result.stdout.includes('algorithm'),
-        'should mention algorithm parameter')
+    t.ok(result.stdout.toLowerCase().includes('type'),
+        'should mention type parameter')
     t.ok(result.stdout.includes('format'),
         'should mention format option')
     t.ok(result.stdout.includes('raw'),
@@ -118,7 +132,7 @@ test('keys command shows help with --help flag', async t => {
         'should mention jwk format')
 })
 
-test('Ed25519 raw format has multikey public key and base64url private key', async t => {
+test('Ed25519 raw has multikey public key & base64url private key', async t => {
     const result = await runCLI(['keys', 'ed25519'])
 
     t.equal(result.code, 0, 'command should exit with code 0')
@@ -599,12 +613,13 @@ test('JS API: keys() generates Ed25519 keypair by default', async t => {
     t.ok(typeof keypair.publicKey === 'string', 'publicKey should be a string')
     t.ok(typeof keypair.privateKey === 'string', 'privateKey should be a string')
     if (typeof keypair.publicKey === 'string') {
-        t.ok(keypair.publicKey.startsWith('z6Mk'), 'publicKey should be in multikey format')
+        t.ok(keypair.publicKey.startsWith('z6Mk'),
+            'publicKey should be in multikey format')
     }
 })
 
 test('JS API: keys() generates X25519 keypair', async t => {
-    const keypair = await keys({ algorithm: 'x25519' })
+    const keypair = await keys({ keyType: 'x25519' })
 
     t.ok(keypair.publicKey, 'should have publicKey property')
     t.ok(keypair.privateKey, 'should have privateKey property')
@@ -629,7 +644,8 @@ test('JS API: sign() signs a message', async t => {
 
         t.ok(signature, 'should return a signature')
         t.ok(typeof signature === 'string', 'signature should be a string')
-        t.ok(/^[A-Za-z0-9_-]+$/.test(signature), 'signature should be base64url encoded')
+        t.ok(/^[A-Za-z0-9_-]+$/.test(signature),
+            'signature should be base64url encoded')
     }
 })
 
@@ -641,22 +657,33 @@ test('JS API: sign() produces consistent signatures', async t => {
         const sig1 = await sign(message, { key: keypair.privateKey })
         const sig2 = await sign(message, { key: keypair.privateKey })
 
-        t.equal(sig1, sig2, 'signatures should be identical for same message and key')
+        t.equal(sig1, sig2,
+            'signatures should be identical for same message and key')
     }
 })
 
 test('JS API: sign() signs with RSA keys', async t => {
-    const keypair = await keys({ algorithm: 'rsa' })
+    const keypair = await keys({ keyType: 'rsa' })
     if (typeof keypair.privateKeyPem === 'string') {
         const message = 'test message for RSA'
         const signature = await sign(message, { key: keypair.privateKeyPem })
 
         t.ok(signature, 'should return a signature')
         t.ok(typeof signature === 'string', 'signature should be a string')
-        t.ok(/^[A-Za-z0-9_-]+$/.test(signature), 'signature should be base64url encoded')
+        t.ok(/^[A-Za-z0-9_-]+$/.test(signature),
+            'signature should be base64url encoded')
         // RSA-PSS signatures are 256 bytes (2048-bit key), base64url encoded
         t.ok(signature.length > 300, 'RSA signature should be longer than Ed25519')
     }
+})
+
+test('keys() generates RSA encryption keypair with use=exchange', async t => {
+    const keypair = await keys({ keyType: 'rsa', use: 'exchange', format: 'jwk' }) as any
+
+    // Should return RSA JWK
+    t.equal(keypair.kty, 'RSA', 'should be RSA JWK')
+    t.ok(keypair.d, 'should have d (private exponent)')
+    t.ok(keypair.n, 'should have n (modulus)')
 })
 
 test('JS API: encode() converts UTF-8 to base64', async t => {

@@ -13,13 +13,12 @@ export async function encode (
     options:{
         inputFormat?:u.SupportedEncodings|'multi',
         outputFormat:u.SupportedEncodings|'multi',
-        useMultibase?:boolean,
         keyType?:'ed25519'|'rsa'
     }
 ):Promise<string> {
     const inputFormat = options.inputFormat || 'utf8'
     const outputFormat = options.outputFormat
-    const useMultibase = options.useMultibase || false
+    // const useMultibase = options.useMultibase || false
     const keyType = options.keyType
 
     let bytes:Uint8Array
@@ -48,16 +47,11 @@ export async function encode (
             }
         }
         // For encode command, we're not dealing with SPKI format
-        return formatOutput(keyBytes, 'multi', false, keyType, false)
+        return formatOutput(keyBytes, 'multi', keyType, false)
     }
 
     // Then encode to the output format
     const output = u.toString(bytes, outputFormat)
-
-    if (useMultibase) {
-        const prefix = getMultibasePrefix(outputFormat)
-        return prefix + output
-    }
 
     return output
 }
@@ -73,21 +67,22 @@ export async function encode (
  *             Can use format 'jwk' for JWK format.
  * For RSA: Private keys are exported as PKCS#8 PEM or JWK,
  *          public keys as multikey format or JWK.
+ *          Use 'sign' for RSA-PSS (signing), 'exchange' for RSA-OAEP (encryption).
  */
 export async function keys (args:{
-    algorithm?:'ed25519'|'x25519'|'rsa',
+    keyType?:'ed25519'|'x25519'|'rsa',
     format?:'raw'|'jwk',
-    useMultibase?:boolean
+    use?:'sign'|'exchange'
 } = {}):Promise<{
     publicKey:string|object,
     privateKey?:string|object,
     privateKeyPem?:string
 }> {
-    const algorithm = args.algorithm || 'ed25519'
+    const keyType = args.keyType || 'ed25519'
     const publicFormat = args.format || 'raw'
-    const useMultibase = args.useMultibase || false
+    const use = args.use || 'sign'
 
-    if (algorithm === 'ed25519') {
+    if (keyType === 'ed25519') {
         const keypair = await webcrypto.subtle.generateKey(
             {
                 name: 'Ed25519',
@@ -115,7 +110,6 @@ export async function keys (args:{
             const publicKeyFormatted = await formatOutput(
                 new Uint8Array(publicKey),
                 'multi',
-                useMultibase,
                 'ed25519',
                 true
             )
@@ -130,7 +124,7 @@ export async function keys (args:{
                 privateKey: privateKeyJwk.d
             }
         }
-    } else if (algorithm === 'x25519') {
+    } else if (keyType === 'x25519') {
         const keypair = await webcrypto.subtle.generateKey(
             {
                 name: 'X25519',
@@ -170,16 +164,23 @@ export async function keys (args:{
                 privateKey: privateKeyJwk.d
             }
         }
-    } else if (algorithm === 'rsa') {
+    } else if (keyType === 'rsa') {
+        const algorithmName = use === 'exchange' ? 'RSA-OAEP' : 'RSA-PSS'
+        const keyUsages:(
+            'encrypt' | 'decrypt' | 'sign' | 'verify'
+        )[] = use === 'exchange' ?
+            ['encrypt', 'decrypt'] :
+            ['sign', 'verify']
+
         const keypair = await webcrypto.subtle.generateKey(
             {
-                name: 'RSA-PSS',
+                name: algorithmName,
                 modulusLength: 2048,
                 publicExponent: new Uint8Array([1, 0, 1]),
                 hash: 'SHA-256'
             },
             true,
-            ['sign', 'verify']
+            keyUsages
         )
 
         if (publicFormat === 'jwk') {
@@ -205,7 +206,6 @@ export async function keys (args:{
             const publicKeyFormatted = await formatOutput(
                 new Uint8Array(publicKey),
                 'multi',
-                useMultibase,
                 'rsa',
                 true
             )
@@ -217,7 +217,7 @@ export async function keys (args:{
         }
     }
 
-    throw new Error(`Unsupported algorithm: ${algorithm}`)
+    throw new Error(`Unsupported keyType: ${keyType}`)
 }
 
 /**
@@ -228,7 +228,6 @@ export async function keys (args:{
 export async function formatOutput (
     bytes:Uint8Array,
     format:u.SupportedEncodings|'did'|'multi'|'raw',
-    useMultibase = false,
     keyType?:'ed25519'|'rsa',
     isPublicKey = false
 ):Promise<string> {
@@ -261,17 +260,6 @@ export async function formatOutput (
     }
 
     const encoded = u.toString(bytes, format as u.SupportedEncodings)
-
-    if (useMultibase) {
-        const prefix = getMultibasePrefix(format as u.SupportedEncodings)
-        return prefix + encoded
-    }
-
-    // Legacy behavior: always add 'z' prefix for base58btc when not
-    // using multibase flag
-    if (format === 'base58btc') {
-        return 'z' + encoded
-    }
 
     return encoded
 }

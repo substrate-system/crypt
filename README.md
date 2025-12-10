@@ -8,7 +8,9 @@
 [![install size](https://flat.badgen.net/packagephobia/install/@substrate-system/crypt)](https://packagephobia.com/result?p=@substrate-system/crypt)
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
-A CLI tool and JavaScript library for creating cryptographic keys and encoding strings. Provides both a command-line interface (`crypt`) and a programmatic API.
+A CLI tool and JavaScript library for creating keys and
+encoding strings. Exposes a command-line interface (`crypt`) and a
+Typescript API.
 
 
 <details><summary><h2>Contents</h2></summary>
@@ -19,7 +21,7 @@ A CLI tool and JavaScript library for creating cryptographic keys and encoding s
   * [Generate and Encode Keys](#generate-and-encode-keys)
   * [Show Help Text](#show-help-text)
 - [Commands](#commands)
-  * [`keys [algorithm]`](#keys-algorithm)
+  * [`keys [keyType]`](#keys-keytype)
   * [`sign [message]`](#sign-message)
   * [`encode [output-format]`](#encode-output-format)
   * [`decode [input-format]`](#decode-input-format)
@@ -52,6 +54,8 @@ Or install locally, and run with `npx`:
 npm i -D @substrate-system/crypt
 npx crypt keys
 ```
+
+## Example
 
 ### Generate and Encode Keys
 
@@ -116,7 +120,7 @@ npx crypt encode --help
 
 ## Commands
 
-### `keys [algorithm]`
+### `keys [keyType]`
 
 Generate a new cryptographic keypair, by default `ed25519`.
 
@@ -136,7 +140,7 @@ JSON to stdout.
 
 #### Arguments
 
-* `algorithm` - The algorithm to use (default: `ed25519`)
+* `keyType` - The key type to use (default: `ed25519`)
   - `ed25519` - Ed25519 elliptic curve (signing)
   - `x25519` - X25519 elliptic curve (key exchange/ECDH)
   - `rsa` - RSA-PSS 2048-bit (signing)
@@ -157,6 +161,11 @@ JSON to stdout.
   - RSA private keys are written as PKCS#8 PEM format
   - Ed25519 and X25519 private keys are written as base64url-encoded seed (default)
     or JWK format (if using `-f jwk`)
+
+* `-u, --use` - Key usage for RSA keys (default: `sign`)
+  - `sign` - **(default)** Generate RSA-PSS key for signing
+  - `exchange` - Generate RSA-OAEP key for encryption/key exchange
+  - Only applies to RSA keys; ignored for Ed25519 and X25519
 
 #### `keys` Example
 
@@ -186,12 +195,17 @@ npx crypt keys x25519 -f jwk
 # => {"key_ops":["deriveKey","deriveBits"],"ext":true,"crv":"X25519","d":"...","x":"...","kty":"OKP"}
 # (Returns private key JWK; public key is in the 'x' field)
 
-# Generate RSA keypair, save private key to file as PEM
+# Generate RSA signing keypair, save private key to file as PEM
 npx crypt keys rsa -o private.pem
 # => {"publicKey":"z5Tc..."}
-# (private.pem contains PKCS#8 PEM format)
+# (private.pem contains PKCS#8 PEM format for RSA-PSS)
 
-# Generate RSA keypair in JWK format
+# Generate RSA encryption keypair with --use exchange
+npx crypt keys rsa -f jwk -u exchange
+# => {...JWK with private key...}
+# (Returns private key JWK for RSA-OAEP)
+
+# Generate RSA keypair in JWK format (signing by default)
 npx crypt keys rsa -f jwk
 # => {...JWK with private key...}
 # (Returns private key JWK; public key components are included)
@@ -201,7 +215,8 @@ npx crypt keys rsa -f jwk
 
 ### `sign [message]`
 
-Sign a message with an Ed25519 private key. The message can be provided as a positional argument or read from stdin.
+Sign a message with an Ed25519 private key. The message can be provided as
+a positional argument or read from stdin.
 
 #### Arguments
 
@@ -321,7 +336,6 @@ npm i -S @substrate-system/crypt
 ### Importing
 
 ```js
-// Import specific functions
 import { keys, sign, encode, decode } from '@substrate-system/crypt'
 
 // Or import everything
@@ -334,9 +348,9 @@ Generate a new cryptographic keypair.
 
 ```ts
 async function keys (args:{
-    algorithm?:'ed25519'|'x25519'|'rsa',
+    keyType?:'ed25519'|'x25519'|'rsa',
     format?:'raw'|'jwk',
-    useMultibase?:boolean
+    use?:'sign'|'exchange'
 } = {}):Promise<{
     publicKey:string|object,
     privateKey?:string|object,
@@ -347,8 +361,12 @@ async function keys (args:{
 #### Parameters
 
 - `options` (object, optional):
-  * `algorithm` (`ed25519`, `rsa` or `x25519`; default: `ed25519`)
+  * `keyType` (`ed25519`, `rsa` or `x25519`; default: `ed25519`)
   * `format` (`'raw' | 'jwk'`, default: `'raw'`) - Output format
+  * `use` (`'sign' | 'exchange'`, default: `'sign'`) - Key usage for RSA keys
+    - `'sign'` - Generate RSA-PSS key for signing
+    - `'exchange'` - Generate RSA-OAEP key for encryption/key exchange
+    - Ignored for Ed25519 and X25519 keys
   * `useMultibase` (boolean, default: `false`) - Add multibase prefix
     (currently not functional for multikey format)
 
@@ -369,10 +387,13 @@ console.log(keypair.publicKey)  // z6Mk... (multikey format)
 console.log(keypair.privateKey)  // base64url-encoded seed
 
 // Generate X25519 keypair
-const x25519Keys = await keys({ algorithm: 'x25519' })
+const x25519Keys = await keys({ keyType: 'x25519' })
 
-// Generate RSA keypair in JWK format
-const rsaJwk = await keys({ algorithm: 'rsa', format: 'jwk' })
+// Generate RSA signing keypair in JWK format
+const rsaJwk = await keys({ keyType: 'rsa', format: 'jwk' })
+
+// Generate RSA encryption keypair
+const rsaEncryptJwk = await keys({ keyType: 'rsa', format: 'jwk', use: 'exchange' })
 ```
 
 ### `sign(message, options)`
@@ -408,7 +429,7 @@ const ed25519Sig = await sign('Hello World', { key: ed25519Keypair.privateKey })
 console.log(ed25519Sig)  // Base64url-encoded signature
 
 // Sign with RSA key
-const rsaKeypair = await keys({ algorithm: 'rsa' })
+const rsaKeypair = await keys({ keyType: 'rsa' })
 const rsaSig = await sign('Hello World', { key: rsaKeypair.privateKeyPem })
 console.log(rsaSig)  // Base64url-encoded signature
 ```
