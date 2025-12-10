@@ -18,6 +18,7 @@ Typescript API.
 <!-- toc -->
 
 - [Install](#install)
+- [Example](#example)
   * [Generate and Encode Keys](#generate-and-encode-keys)
   * [Show Help Text](#show-help-text)
 - [Commands](#commands)
