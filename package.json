@@ -5,6 +5,9 @@
   "type": "module",
   "main": "dist/cli.js",
   "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "provenance": true
+  },
   "files": [
     "./dist/*"
   ],
