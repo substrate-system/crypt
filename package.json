@@ -1,5 +1,5 @@
 {
-  "name": "@mycelial-systems/crypt",
+  "name": "@substrate-system/crypt",
   "version": "0.1.15",
   "description": "CLI tool for creating and ecoding keys",
   "type": "module",
