@@ -4,7 +4,8 @@ import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import * as u from 'uint8arrays'
 import chalk from 'chalk'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, realpathSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import {
     keys,
     encode,
@@ -14,8 +15,15 @@ import {
     formatOutput
 } from './index.js'
 
-// Only run CLI if this file is being executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Only run CLI if this file is being executed directly.
+// Resolve symlinks so the check works when invoked via the bin shim
+// (e.g. node_modules/.bin/crypt).
+const invokedAs = (
+    process.argv[1] &&
+    pathToFileURL(realpathSync(process.argv[1])).href
+)
+
+if (import.meta.url === invokedAs) {
     await yargs(hideBin(process.argv))
         .command(
             'public <privateKey>',
