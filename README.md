@@ -74,6 +74,11 @@ For **X25519** keys (used for key exchange/ECDH), output is the same as Ed25519:
 For **RSA** keys, the private key is written to a file (requires `-o` option)
 and the public key is printed to `stdout` in multikey format.
 
+For **secp256k1** (`k256`) keys, this prints a JSON string with
+`{ publicKey, privateKey }` to `stdout`. By default (format `raw`):
+- `publicKey` is in multikey format (compressed)
+- `privateKey` is base64url-encoded
+
 You can pass in a different encoding to use for the output with
 the `-f` or `--format` option.
 
@@ -89,6 +94,9 @@ npx crypt keys rsa -o private.pem
 
 # Generate RSA keypair in JWK format (outputs both keys to stdout)
 npx crypt keys rsa -f jwk
+
+# Generate secp256k1 (k256) keypair
+npx crypt keys k256
 
 # Derive a public key from a private key
 npx crypt public <private-key> --type ed25519 --input base64url --format json
@@ -144,34 +152,45 @@ base64url-encoded. Use `-f jwk` for JWK format.
 (in PKCS#8 PEM format), unless using `-f jwk` which outputs both keys as
 JSON to stdout.
 
+**secp256k1 keys** (`k256`, signing): Output is a JSON string of
+`{ publicKey, privateKey }` to stdout. By default (`-f raw`), the public key
+is in multikey format (compressed, with the `secp256k1-pub` multicodec
+prefix `0xe7 0x01`) and the private key is base64url-encoded. Use `-f jwk`
+for JWK format (`kty: 'EC'`, `crv: 'secp256k1'`).
+
 #### Arguments
 
 * `keyType` - The key type to use (default: `ed25519`)
   - `ed25519` - Ed25519 elliptic curve (signing)
   - `x25519` - X25519 elliptic curve (key exchange/ECDH)
   - `rsa` - RSA-PSS 2048-bit (signing)
+  - `k256` - secp256k1 elliptic curve (signing)
 
 #### Options
 
 * `-f, --format` - Output format (default: `raw`)
   - `raw` - **(default)** For Ed25519: public key in multikey format,
-    private key as base64url-encoded seed. For X25519: both keys as
-    base64url-encoded strings. For RSA: requires `-o` option.
+    private key as base64url-encoded seed. For X25519: public key in
+    multikey format, private key base64url-encoded. For k256: public
+    key in multikey format (compressed), private key base64url-encoded.
+    For RSA: requires `-o` option.
   - `jwk` - JSON Web Key format (outputs private key JWK,
-    which includes public key in `x` field for Ed25519 and X25519)
+    which includes public key in `x` field for Ed25519 and X25519; for
+    k256, returns `{ kty, crv, x, y, d }`)
+  - `did` - DID format string (`did:key:...`) for the public key
 
 * `-o, --output` - Output file for private key
   - **Required for RSA** (unless using `-f jwk`)
-  - Optional for Ed25519 and X25519
+  - Optional for Ed25519, X25519, and k256
     (if specified, private key goes to file instead of stdout)
   - RSA private keys are written as PKCS#8 PEM format
-  - Ed25519 and X25519 private keys are written as base64url-encoded seed (default)
-    or JWK format (if using `-f jwk`)
+  - Ed25519, X25519, and k256 private keys are written as
+    base64url-encoded seed (default) or JWK format (if using `-f jwk`)
 
 * `-u, --use` - Key usage for RSA keys (default: `sign`)
   - `sign` - **(default)** Generate RSA-PSS key for signing
   - `exchange` - Generate RSA-OAEP key for encryption/key exchange
-  - Only applies to RSA keys; ignored for Ed25519 and X25519
+  - **Only applies to RSA keys**; ignored for Ed25519, X25519, and k256
 
 #### `keys` Example
 
@@ -215,6 +234,19 @@ npx crypt keys rsa -f jwk -u exchange
 npx crypt keys rsa -f jwk
 # => {...JWK with private key...}
 # (Returns private key JWK; public key components are included)
+
+# Generate secp256k1 (k256) keypair (default: raw format)
+npx crypt keys k256
+# => {"publicKey":"zQ3sh...", "privateKey":"yeUKhUIx9zNIgr8I..."}
+# (publicKey is multikey format, privateKey is base64url-encoded)
+
+# Generate k256 keypair in JWK format
+npx crypt keys k256 -f jwk
+# => {"kty":"EC","crv":"secp256k1","x":"...","y":"...","d":"..."}
+
+# Generate k256 keypair with public key as a did:key string
+npx crypt keys k256 -f did
+# => {"publicKey":"did:key:zQ3sh...","privateKey":"..."}
 ```
 
 ---
@@ -421,8 +453,8 @@ Generate a new cryptographic keypair.
 
 ```ts
 async function keys (args:{
-    keyType?:'ed25519'|'x25519'|'rsa',
-    format?:'raw'|'jwk',
+    keyType?:'ed25519'|'x25519'|'rsa'|'k256',
+    format?:'raw'|'jwk'|'did',
     use?:'sign'|'exchange'
 } = {}):Promise<{
     publicKey:string|object,
@@ -434,20 +466,23 @@ async function keys (args:{
 #### Parameters
 
 - `options` (object, optional):
-  * `keyType` (`ed25519`, `rsa` or `x25519`; default: `ed25519`)
-  * `format` (`'raw' | 'jwk'`, default: `'raw'`) - Output format
+  * `keyType` (`'ed25519' | 'x25519' | 'rsa' | 'k256'`; default: `ed25519`).
+    `k256` is secp256k1.
+  * `format` (`'raw' | 'jwk' | 'did'`, default: `'raw'`) - Output format.
+    `did` returns the public key as a `did:key:...` string.
   * `use` (`'sign' | 'exchange'`, default: `'sign'`) - Key usage for RSA keys
     - `'sign'` - Generate RSA-PSS key for signing
     - `'exchange'` - Generate RSA-OAEP key for encryption/key exchange
-    - Ignored for Ed25519 and X25519 keys
-  * `useMultibase` (boolean, default: `false`) - Add multibase prefix
-    (currently not functional for multikey format)
+    - Ignored for Ed25519, X25519, and k256 keys
 
 #### Return value
 
-- For `raw` format Ed25519/X25519: `{ publicKey: string, privateKey: string }`
+- For `raw` format Ed25519/X25519/k256:
+  `{ publicKey: string, privateKey: string }`
 - For `raw` format RSA: `{ publicKey: string, privateKeyPem: string }`
-- For `jwk` format: Returns the JWK object directly
+- For `jwk` format: Returns the JWK object directly (for k256, this is
+  `{ kty: 'EC', crv: 'secp256k1', x, y, d }`)
+- For `did` format: `publicKey` is a `did:key:...` string
 
 **Example:**
 
@@ -467,6 +502,12 @@ const rsaJwk = await keys({ keyType: 'rsa', format: 'jwk' })
 
 // Generate RSA encryption keypair
 const rsaEncryptJwk = await keys({ keyType: 'rsa', format: 'jwk', use: 'exchange' })
+
+// Generate secp256k1 keypair (raw)
+const k256Keys = await keys({ keyType: 'k256' })
+
+// Generate secp256k1 keypair in JWK format
+const k256Jwk = await keys({ keyType: 'k256', format: 'jwk' })
 ```
 
 ### `derivePublicKey(privateKey, options)`
